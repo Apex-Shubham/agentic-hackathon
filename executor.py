@@ -8,7 +8,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from config import (
     BINANCE_API_KEY, BINANCE_API_SECRET, TRAILING_STOP_ACTIVATION,
-    SCALED_TP_LEVELS, INITIAL_CAPITAL
+    SCALED_TP_LEVELS, INITIAL_CAPITAL, STALE_POSITION_MINUTES, STALE_PNL_BAND
 )
 
 
@@ -83,16 +83,48 @@ class Executor:
             if not symbol_info:
                 return {'status': 'ERROR', 'message': f'Symbol {symbol} not found'}
             
-            # Get quantity precision
+            # Get quantity and price precision, step/tick, min notional
             quantity_precision = 0
-            for filter in symbol_info['filters']:
-                if filter['filterType'] == 'LOT_SIZE':
-                    step_size = float(filter['stepSize'])
+            price_precision = 2
+            tick_size = 0.01
+            step_size = 0.001
+            min_notional = None
+            for f in symbol_info['filters']:
+                if f['filterType'] == 'LOT_SIZE':
+                    step_size = float(f['stepSize'])
                     quantity_precision = len(str(step_size).rstrip('0').split('.')[-1])
+                if f['filterType'] == 'PRICE_FILTER':
+                    tick_size = float(f['tickSize'])
+                    # derive price precision from tick size
+                    if tick_size > 0:
+                        price_precision = max(0, len(str(tick_size).rstrip('0').split('.')[-1]))
+                if f['filterType'] in ('MIN_NOTIONAL', 'NOTIONAL'):
+                    # Different API variants
+                    mn = f.get('notional') or f.get('minNotional')
+                    if mn is not None:
+                        try:
+                            min_notional = float(mn)
+                        except Exception:
+                            pass
             
             # Calculate quantity
             quantity = position_size_dollars / current_price
-            quantity = round(quantity, quantity_precision)
+            # snap to step size (avoid floating artifacts)
+            if step_size > 0:
+                increments = max(1, int(quantity / step_size))
+                quantity = round(increments * step_size, quantity_precision)
+            else:
+                quantity = round(quantity, quantity_precision)
+
+            # Ensure min notional requirement
+            notional = quantity * current_price
+            if min_notional and notional < min_notional:
+                needed_qty = (min_notional / current_price)
+                if step_size > 0:
+                    increments = int(needed_qty / step_size + 0.9999)
+                    quantity = round(increments * step_size, quantity_precision)
+                else:
+                    quantity = round(needed_qty, quantity_precision)
             
             # Determine order side
             order_side = 'BUY' if side == 'LONG' else 'SELL'
@@ -105,7 +137,36 @@ class Executor:
                 quantity=quantity
             )
             
-            fill_price = float(order.get('avgPrice', current_price))
+            # Determine fill price robustly
+            fill_price = float(order.get('avgPrice') or 0.0)
+            if fill_price <= 0:
+                # Try position info (most reliable for entry)
+                try:
+                    time.sleep(0.5)
+                    pos_info = self.client.futures_position_information(symbol=symbol)
+                    for pos in pos_info:
+                        amt = float(pos.get('positionAmt', 0))
+                        if abs(amt) > 0:
+                            fill_price = float(pos.get('entryPrice', 0)) or fill_price
+                            break
+                except Exception:
+                    pass
+            if fill_price <= 0:
+                # Fallback to mark price
+                try:
+                    mark = self.client.futures_mark_price(symbol=symbol)
+                    fill_price = float(mark.get('markPrice', current_price))
+                except Exception:
+                    fill_price = current_price
+
+            # Final attempt: recent user trades price
+            if fill_price <= 0:
+                try:
+                    trades = self.client.futures_account_trades(symbol=symbol, limit=5)
+                    if trades:
+                        fill_price = float(trades[-1].get('price', current_price))
+                except Exception:
+                    pass
             
             print(f"✅ Opened {side} position: {symbol} @ ${fill_price:,.2f} | Qty: {quantity} | Leverage: {leverage}x")
             
@@ -122,13 +183,20 @@ class Executor:
             
             # Set stop loss
             sl_order_id = self.set_stop_loss(
-                symbol, side, fill_price, quantity, decision['stop_loss_percent']
+                symbol, side, fill_price, quantity, decision['stop_loss_percent'], price_precision
             )
             
             # Set take profit levels
             tp_order_ids = self.set_take_profit(
-                symbol, side, fill_price, quantity, decision['take_profit_percent']
+                symbol, side, fill_price, quantity, decision['take_profit_percent'], price_precision
             )
+
+            # Verify order status for diagnostics
+            order_status = None
+            try:
+                order_status = self.client.futures_get_order(symbol=symbol, orderId=order['orderId'])
+            except Exception:
+                pass
             
             return {
                 'status': 'SUCCESS',
@@ -139,7 +207,8 @@ class Executor:
                 'leverage': leverage,
                 'order_id': order['orderId'],
                 'stop_loss_order': sl_order_id,
-                'take_profit_orders': tp_order_ids
+                'take_profit_orders': tp_order_ids,
+                'binance_order_status': order_status
             }
             
         except BinanceAPIException as e:
@@ -155,7 +224,8 @@ class Executor:
         side: str,
         entry_price: float,
         quantity: float,
-        stop_loss_percent: float
+        stop_loss_percent: float,
+        price_precision: int
     ) -> Optional[str]:
         """Set stop loss order"""
         try:
@@ -167,8 +237,12 @@ class Executor:
                 stop_price = entry_price * (1 + stop_loss_percent / 100)
                 order_side = 'BUY'
             
+            # Guard against invalid prices
+            if stop_price <= 0:
+                raise ValueError("Computed stop price <= 0")
+            
             # Round to appropriate precision
-            stop_price = round(stop_price, 2)
+            stop_price = round(stop_price, price_precision)
             
             # Place stop loss order
             order = self.client.futures_create_order(
@@ -197,7 +271,8 @@ class Executor:
         side: str,
         entry_price: float,
         quantity: float,
-        take_profit_percent: float
+        take_profit_percent: float,
+        price_precision: int
     ) -> List[str]:
         """Set scaled take profit orders"""
         order_ids = []
@@ -225,7 +300,9 @@ class Executor:
                     tp_price = entry_price * (1 - tp_pct / 100)
                     order_side = 'BUY'
                 
-                tp_price = round(tp_price, 2)
+                if tp_price <= 0:
+                    raise ValueError("Computed take-profit price <= 0")
+                tp_price = round(tp_price, price_precision)
                 tp_qty = round(tp_qty, 3)
                 
                 # Place take profit order
@@ -446,6 +523,37 @@ class Executor:
                         
         except Exception as e:
             print(f"Error updating trailing stops: {e}")
+
+    def close_stale_positions(self):
+        """Close positions that haven't moved (flat PnL) for a while to free capital."""
+        try:
+            positions = self.get_open_positions()
+            if not positions:
+                return
+            # Fetch recent account trades times as proxy for last activity
+            now = datetime.utcnow()
+            for pos in positions:
+                symbol = pos['symbol']
+                try:
+                    trades = self.client.futures_account_trades(symbol=symbol, limit=1)
+                    if trades:
+                        # time in ms
+                        t = int(trades[-1].get('time', 0))
+                        last_ms = max(t, 0)
+                    else:
+                        last_ms = 0
+                except Exception:
+                    last_ms = 0
+
+                minutes_since = 9999
+                if last_ms:
+                    minutes_since = max(0, int((now.timestamp()*1000 - last_ms) / 60000))
+
+                if minutes_since >= STALE_POSITION_MINUTES and abs(pos.get('pnl_percent', 0)) <= (STALE_PNL_BAND):
+                    print(f"⏳ Closing stale position {symbol} (pnl {pos.get('pnl_percent', 0):+.2f}% for {minutes_since}m)")
+                    self.close_position(symbol)
+        except Exception as e:
+            print(f"Error closing stale positions: {e}")
     
     def _update_stop_to_breakeven(self, position: Dict):
         """Move stop loss to breakeven"""

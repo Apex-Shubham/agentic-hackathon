@@ -131,7 +131,20 @@ class Logger:
         completed_trades = trades_df[trades_df['pnl'].notna()]
         
         if len(completed_trades) == 0:
-            return {'total_trades': len(trades_df), 'win_rate': 0}
+            # Ensure full metrics schema even when no completed trades yet
+            return {
+                'total_trades': len(trades_df),
+                'win_rate': 0,
+                'avg_win': 0,
+                'avg_loss': 0,
+                'profit_factor': 0,
+                'sharpe_ratio': self._calculate_sharpe_ratio(),
+                'max_drawdown': self._calculate_max_drawdown(),
+                'total_return': (
+                    ((self.performance_snapshots[-1]['portfolio_value'] - INITIAL_CAPITAL) / INITIAL_CAPITAL) * 100
+                    if self.performance_snapshots else 0
+                )
+            }
         
         # Calculate metrics
         winning_trades = completed_trades[completed_trades['pnl'] > 0]

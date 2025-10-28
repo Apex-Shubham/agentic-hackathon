@@ -1,6 +1,6 @@
 """
-Unit tests for DeepSeek Agent
-Tests LLM integration and decision validation
+Unit tests for Groq-backed Agent (DeepSeekAgent class)
+Tests LLM parsing and validation (offline)
 """
 import pytest
 import json

@@ -1,17 +1,17 @@
 # 🤖 Autonomous AI Trading Bot for Binance Futures
 
-**A fully autonomous trading bot powered by DeepSeek LLM for 14-day trading competitions**
+**A fully autonomous trading bot powered by Groq LLM for 14-day trading competitions**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 🎯 Overview
 
-This is a sophisticated, fully autonomous AI trading bot designed to compete in 14-day Binance Futures trading competitions. It uses DeepSeek's LLM for intelligent decision-making, combined with advanced technical analysis, risk management, and self-healing capabilities.
+This is a sophisticated, fully autonomous AI trading bot designed to compete in 14-day Binance Futures trading competitions. It uses Groq's hosted LLMs for intelligent decision-making, combined with advanced technical analysis, risk management, and self-healing capabilities.
 
 ### Key Features
 
-- **🧠 AI-Powered Decisions**: Uses DeepSeek LLM for intelligent trade analysis
+- **🧠 AI-Powered Decisions**: Uses Groq LLM for intelligent trade analysis
 - **🛡️ Advanced Risk Management**: Multi-level circuit breakers and dynamic position sizing
 - **🔄 Self-Healing**: Automatic error recovery and crash resistance
 - **📊 Technical Analysis**: 15+ indicators across multiple timeframes
@@ -39,7 +39,7 @@ This is a sophisticated, fully autonomous AI trading bot designed to compete in 
         ┌─────────────────────────┼─────────────────────────┐
         │                         │                         │
 ┌───────▼────────┐      ┌────────▼────────┐      ┌────────▼────────┐
-│ Data Pipeline  │      │ Market Analyzer │      │ DeepSeek Agent  │
+│ Data Pipeline  │      │ Market Analyzer │      │ Groq Agent      │
 │ • Real-time    │      │ • Trade Setups  │      │ • AI Decisions  │
 │ • Indicators   │      │ • Confidence    │      │ • Validation    │
 └───────┬────────┘      └────────┬────────┘      └────────┬────────┘
@@ -71,7 +71,7 @@ This is a sophisticated, fully autonomous AI trading bot designed to compete in 
 
 - Python 3.10 or higher
 - Binance Futures Testnet account
-- DeepSeek API key
+- Groq API key
 - Stable internet connection
 
 ### 1. Clone/Download the Repository
@@ -103,8 +103,8 @@ nano .env  # or use your preferred editor
 BINANCE_TESTNET_API_KEY=your_binance_testnet_api_key
 BINANCE_TESTNET_API_SECRET=your_binance_testnet_api_secret
 
-# DeepSeek API
-DEEPSEEK_API_KEY=your_deepseek_api_key
+# Groq API
+GROQ_API_KEY=your_groq_api_key
 
 # Competition Settings
 COMPETITION_START_DATE=2024-11-01T00:00:00Z
@@ -121,12 +121,11 @@ INITIAL_CAPITAL=100000
 3. Generate API keys from account settings
 4. Save API Key and Secret Key
 
-#### **DeepSeek API**
+#### **Groq API**
 
-1. Visit [DeepSeek Platform](https://platform.deepseek.com/)
-2. Sign up and navigate to API section
-3. Generate an API key
-4. Save the key securely
+1. Visit [Groq Cloud](https://console.groq.com/)
+2. Create an API key
+3. Save the key securely
 
 ### 5. Run Tests (Optional but Recommended)
 
@@ -166,7 +165,7 @@ python run_with_restart.py
    python -c "from data_pipeline import DataPipeline; dp = DataPipeline(); dp.test_connection()"
    ```
 
-### DeepSeek API Setup
+### Groq API Setup
 
 1. **Register**: Create account at [platform.deepseek.com](https://platform.deepseek.com)
 2. **Get Credits**: New users typically get free credits
@@ -186,7 +185,7 @@ python run_with_restart.py
 |----------|-------------|---------|----------|
 | `BINANCE_TESTNET_API_KEY` | Binance API key | - | ✅ |
 | `BINANCE_TESTNET_API_SECRET` | Binance API secret | - | ✅ |
-| `DEEPSEEK_API_KEY` | DeepSeek API key | - | ✅ |
+| `GROQ_API_KEY` | Groq API key | - | ✅ |
 | `INITIAL_CAPITAL` | Starting capital | 100000 | ✅ |
 | `COMPETITION_START_DATE` | Start date (ISO format) | - | ✅ |
 | `COMPETITION_DURATION_DAYS` | Duration in days | 14 | ✅ |
@@ -321,7 +320,7 @@ pytest tests/ -v
 # Test risk management
 pytest tests/test_risk_manager.py -v
 
-# Test DeepSeek agent
+# Test Groq agent
 pytest tests/test_deepseek_agent.py -v
 
 # Test data pipeline
@@ -356,14 +355,14 @@ pytest tests/test_data_pipeline.py -v
 - Check that "Futures" permission is enabled
 - Test connection: `python -c "from data_pipeline import DataPipeline; DataPipeline().test_connection()"`
 
-#### 2. **DeepSeek API Errors**
+#### 2. **Groq API Errors**
 
 ```
-⚠️ DeepSeek API error: 401 Unauthorized
+⚠️ Groq API error: 401 Unauthorized
 ```
 
 **Solution:**
-- Verify `DEEPSEEK_API_KEY` in `.env`
+- Verify `GROQ_API_KEY` in `.env`
 - Check API credit balance
 - Ensure API key has proper permissions
 - Bot will use fallback logic if API is down
@@ -444,7 +443,7 @@ For each asset, the bot:
 2. Calculates technical indicators
 3. Identifies trade setups
 4. Builds context for LLM
-5. Queries DeepSeek for decision
+5. Queries Groq for decision
 6. Validates decision against rules
 7. Calculates position size and leverage
 8. Executes trade if all checks pass
@@ -578,7 +577,7 @@ CIRCUIT_BREAKERS = {
 ### Documentation
 
 - [Binance Futures API](https://binance-docs.github.io/apidocs/futures/en/)
-- [DeepSeek API Docs](https://platform.deepseek.com/docs)
+- [Groq API Docs](https://console.groq.com/docs)
 - [Technical Analysis Library](https://technical-analysis-library-in-python.readthedocs.io/)
 
 ### Common Commands

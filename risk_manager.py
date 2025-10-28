@@ -6,7 +6,7 @@ from typing import Dict, Tuple
 from datetime import datetime, timedelta, timezone
 from config import (
     INITIAL_CAPITAL, MAX_DRAWDOWN, MAX_LEVERAGE, MAX_POSITION_SIZE,
-    MAX_OPEN_POSITIONS, CIRCUIT_BREAKERS
+    MAX_OPEN_POSITIONS, CIRCUIT_BREAKERS, MIN_CONFIDENCE
 )
 
 
@@ -235,8 +235,8 @@ class RiskManager:
             return False, f"Max positions ({MAX_OPEN_POSITIONS}) already open"
         
         # Check confidence threshold
-        if decision['confidence'] < 70:
-            return False, f"Confidence {decision['confidence']}% below minimum threshold (70%)"
+        if decision['confidence'] < MIN_CONFIDENCE:
+            return False, f"Confidence {decision['confidence']}% below minimum threshold ({MIN_CONFIDENCE}%)"
         
         # Check available margin
         available_balance = portfolio.get('available_balance', 0)

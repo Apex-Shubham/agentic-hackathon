@@ -19,7 +19,7 @@ class HealthMonitor:
         self.consecutive_errors = 0
         self.api_health = {
             'binance': True,
-            'deepseek': True
+            'groq': True
         }
         self.last_health_check = datetime.now(timezone.utc)
         self.recovery_attempts = 0
@@ -132,7 +132,7 @@ class HealthMonitor:
         # Try to recover based on service
         if service == 'binance':
             self._recover_binance_connection()
-        elif service == 'deepseek':
+        elif service == 'groq':
             self._recover_deepseek_connection()
         
         # If recovery successful, mark as healthy
@@ -170,7 +170,7 @@ class HealthMonitor:
             # Try a simple decision
             test_decision = agent._get_hold_decision("Connection test")
             if test_decision:
-                self.api_health['deepseek'] = True
+                self.api_health['groq'] = True
                 print("   ✅ DeepSeek connection recovered")
                 return True
             

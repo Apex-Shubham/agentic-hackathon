@@ -1,6 +1,6 @@
 """
-Main Trading Bot Orchestrator
-Coordinates all modules and runs the main trading loop
+Main Trading Bot Orchestrator - ENHANCED VERSION
+Improved trading signals with smart entry and exit logic
 """
 import sys
 import time
@@ -11,7 +11,7 @@ from typing import Dict
 
 from config import (
     validate_config, COMPETITION_START_DATE, COMPETITION_DURATION_DAYS,
-    CHECK_INTERVAL_SECONDS, TRADING_ASSETS, INITIAL_CAPITAL
+    CHECK_INTERVAL_SECONDS, TRADING_ASSETS, INITIAL_CAPITAL, MIN_CONFIDENCE
 )
 from data_pipeline import DataPipeline
 from market_analyzer import get_analyzer
@@ -23,11 +23,11 @@ from health_monitor import get_health_monitor
 
 
 class TradingBot:
-    """Main trading bot orchestrator"""
+    """Main trading bot orchestrator with enhanced signals"""
     
     def __init__(self):
         print("=" * 70)
-        print("🤖 AUTONOMOUS AI TRADING BOT - INITIALIZING")
+        print("🤖 ENHANCED AUTONOMOUS AI TRADING BOT - INITIALIZING")
         print("=" * 70)
         
         # Validate configuration
@@ -60,6 +60,7 @@ class TradingBot:
         print(f"💰 Initial Capital: ${INITIAL_CAPITAL:,.2f}")
         print(f"📊 Trading Assets: {', '.join(TRADING_ASSETS)}")
         print(f"⏱️  Check Interval: {CHECK_INTERVAL_SECONDS}s")
+        print(f"🎯 Enhanced Signals: Multi-confirmation + Smart Exits")
         print("=" * 70)
         
         # Register cleanup handlers
@@ -85,7 +86,7 @@ class TradingBot:
     
     def run(self):
         """Main trading loop"""
-        print("🚀 STARTING AUTONOMOUS TRADING")
+        print("🚀 STARTING ENHANCED AUTONOMOUS TRADING")
         print("=" * 70)
         print("⚠️  Bot will run continuously for 14 days")
         print("⚠️  Do not interrupt unless absolutely necessary")
@@ -147,6 +148,9 @@ class TradingBot:
         
         # Log performance snapshot
         self.logger.log_performance_snapshot(portfolio)
+
+        # Optionally force a single initial trade to bootstrap
+        self._force_initial_trade_once(portfolio, current_day)
         
         # Check circuit breakers
         can_trade, reason = self.risk_manager.check_circuit_breakers()
@@ -163,12 +167,15 @@ class TradingBot:
             
             return
         
-        # Update trailing stops for existing positions
+        # Update trailing stops and close stale positions
         self.executor.update_trailing_stops()
+        self.executor.close_stale_positions()
         
         # Analyze each asset
         for asset in TRADING_ASSETS:
             try:
+                # Refresh portfolio before each asset to consider any prior trades
+                portfolio = self.executor.get_portfolio_status()
                 self._analyze_and_trade(asset, portfolio, current_day)
             except Exception as e:
                 print(f"❌ Error processing {asset}: {e}")
@@ -179,7 +186,7 @@ class TradingBot:
             self._print_status(portfolio)
     
     def _analyze_and_trade(self, asset: str, portfolio: Dict, day_number: int):
-        """Analyze asset and execute trade if appropriate"""
+        """ENHANCED: Analyze asset and execute trade with improved signals"""
         
         # Fetch market data
         market_data = self.data_pipeline.fetch_realtime_data(asset)
@@ -189,8 +196,9 @@ class TradingBot:
             print(f"⚠️ Invalid data for {asset}, skipping...")
             return
         
-        # Get market regime
+        # Get market regime and indicators
         regime = market_data.get('regime', 'UNKNOWN')
+        indicators = market_data.get('indicators', {})
         
         # Check if we already have a position in this asset
         existing_position = None
@@ -199,19 +207,50 @@ class TradingBot:
                 existing_position = pos
                 break
         
-        # If we have an existing position, check if we should close it
+        # ========================================
+        # ENHANCED EXIT LOGIC
+        # ========================================
         if existing_position:
-            # Close if significant loss or stale position
             pnl = existing_position['pnl_percent']
             
-            if pnl < -5:  # Stop loss triggered at software level
-                print(f"🛑 Closing {asset}: Stop loss triggered ({pnl:.1f}%)")
+            # Emergency stop loss at -5%
+            if pnl < -5:
+                print(f"🛑 Emergency Stop Loss: Closing {asset} at {pnl:.1f}%")
                 result = self.executor.close_position(asset)
                 self.logger.log_trade(result)
                 return
             
-            # Don't open new position if we already have one
+            # Check enhanced exit signals from market analyzer
+            should_exit, exit_reason, exit_confidence = self.analyzer.should_exit_position(
+                existing_position, market_data, indicators
+            )
+            
+            if should_exit and exit_confidence >= 75:
+                print(f"\n📉 SMART EXIT SIGNAL for {asset}")
+                print(f"   Exit Confidence: {exit_confidence}%")
+                print(f"   Current PnL: {pnl:+.2f}%")
+                print(f"   Reason: {exit_reason}")
+                
+                result = self.executor.close_position(asset)
+                
+                # Create decision object for logging
+                exit_decision = {
+                    'action': 'CLOSE',
+                    'confidence': exit_confidence,
+                    'entry_reason': exit_reason
+                }
+                self.logger.log_decision(exit_decision, market_data, result)
+                
+                if result['status'] == 'SUCCESS':
+                    self.logger.log_trade(result)
+                return
+            
+            # Don't open new position if we already have one and no exit signal
             return
+        
+        # ========================================
+        # ENHANCED ENTRY LOGIC
+        # ========================================
         
         # Get LLM decision
         try:
@@ -222,7 +261,7 @@ class TradingBot:
             decision = self.deepseek_agent.get_fallback_decision(market_data, portfolio)
         
         # Skip if HOLD or low confidence
-        if decision['action'] == 'HOLD' or decision['confidence'] < 70:
+        if decision['action'] == 'HOLD' or decision['confidence'] < MIN_CONFIDENCE:
             return
         
         # Calculate position size
@@ -272,6 +311,8 @@ class TradingBot:
             if result['status'] == 'SUCCESS':
                 self.logger.log_trade(result)
                 self.risk_manager.total_trades_today += 1
+                # Update portfolio after successful trade so next asset can trade with updated margin
+                portfolio.update(self.executor.get_portfolio_status())
             else:
                 print(f"   ❌ Trade execution failed: {result.get('message')}")
         
@@ -301,6 +342,61 @@ class TradingBot:
             return False
         
         return True
+
+    def _force_initial_trade_once(self, portfolio, day_number):
+        # Only execute once per process
+        if getattr(self, "_forced_trade_done", False):
+            return
+        from config import (
+            FORCE_INITIAL_TRADE, INITIAL_TRADE_SYMBOL, INITIAL_TRADE_SIDE,
+            INITIAL_TRADE_SIZE_PCT, INITIAL_TRADE_LEVERAGE, MIN_CONFIDENCE
+        )
+        if not FORCE_INITIAL_TRADE:
+            return
+        try:
+            asset = INITIAL_TRADE_SYMBOL
+            decision = {
+                'action': INITIAL_TRADE_SIDE,
+                'confidence': max(MIN_CONFIDENCE, 90),
+                'position_size_percent': INITIAL_TRADE_SIZE_PCT,
+                'leverage': INITIAL_TRADE_LEVERAGE,
+                'entry_reason': 'Forced initial trade (bootstrap)',
+                'stop_loss_percent': 4,
+                'take_profit_percent': 15,
+                'urgency': 'HIGH'
+            }
+            size_decimal = INITIAL_TRADE_SIZE_PCT / 100
+
+            is_valid, msg = self.risk_manager.validate_trade(
+                decision=decision,
+                portfolio=portfolio,
+                position_size=size_decimal,
+                leverage=INITIAL_TRADE_LEVERAGE
+            )
+            if not is_valid:
+                print(f"⚠️ Forced trade blocked by validation: {msg}")
+                self._forced_trade_done = True
+                return
+
+            position_size_dollars = portfolio['total_value'] * size_decimal
+            print(f"\n⚡ FORCED TRADE: {decision['action']} {asset} | size={size_decimal:.1%} ($" \
+                  f"{position_size_dollars:,.2f}) lev={INITIAL_TRADE_LEVERAGE}x")
+            result = self.executor.execute_trade(
+                asset, decision, position_size_dollars, INITIAL_TRADE_LEVERAGE
+            )
+
+            self.logger.log_decision(decision, {'symbol': asset, 'price': None, 'regime': 'UNKNOWN'}, result)
+            if result.get('status') == 'SUCCESS':
+                self.logger.log_trade(result)
+                self.risk_manager.total_trades_today += 1
+                updated = self.executor.get_portfolio_status()
+                portfolio.update(updated)
+            else:
+                print(f"   ❌ Forced trade failed: {result.get('message')}")
+            self._forced_trade_done = True
+        except Exception as e:
+            print(f"❌ Forced trade error: {e}")
+            self._forced_trade_done = True
     
     def _print_status(self, portfolio: Dict):
         """Print current status summary"""
@@ -374,4 +470,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

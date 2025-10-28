@@ -87,11 +87,11 @@ class DataPipeline:
     def _fetch_klines(self, symbol: str, timeframe: str, limit: int = KLINE_LIMIT) -> Optional[pd.DataFrame]:
         """Fetch OHLCV candle data"""
         try:
-            # Check cache (5 minute cache)
+            # Check cache (short cache for fast testing)
             cache_key = f"{symbol}_{timeframe}"
             if cache_key in self.cache:
                 cache_time, cached_df = self.cache[cache_key]
-                if time.time() - cache_time < 300:  # 5 minutes
+                if time.time() - cache_time < 60:  # 60s cache for quick refresh
                     return cached_df
             
             klines = self.client.futures_klines(
