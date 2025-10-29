@@ -22,7 +22,7 @@ MIN_CONFIDENCE = int(os.getenv('MIN_CONFIDENCE', 60))
 
 # IMPORTANT: Initial capital will be fetched from Binance at runtime
 # This is just a fallback/default
-INITIAL_CAPITAL = float(os.getenv('INITIAL_CAPITAL', 10000))
+INITIAL_CAPITAL = float(os.getenv('INITIAL_CAPITAL', 5000))
 
 # Forced initial trade (for bootstrapping/testing)
 FORCE_INITIAL_TRADE = os.getenv('FORCE_INITIAL_TRADE', 'false').lower() == 'true'

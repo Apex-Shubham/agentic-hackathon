@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apex Trading Bot Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Apex Trading Bot Dashboard</h1>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot"></span>
+                <span id="statusText">Loading...</span>
+            </div>
+        </header>
+
+        <!-- Portfolio Overview -->
+        <section class="portfolio-section">
+            <h2>Portfolio Overview</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Portfolio Value</div>
+                    <div class="metric-value" id="portfolioValue">$0.00</div>
+                    <div class="metric-change" id="portfolioChange">0.00%</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Total Return</div>
+                    <div class="metric-value" id="totalReturn">0.00%</div>
+                    <div class="metric-change" id="returnChange"></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Drawdown</div>
+                    <div class="metric-value" id="drawdown">0.00%</div>
+                    <div class="metric-change" id="drawdownIndicator"></div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Available Balance</div>
+                    <div class="metric-value" id="availableBalance">$0.00</div>
+                    <div class="metric-change" id="unrealizedPnL">PnL: $0.00</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Performance Chart -->
+        <section class="chart-section">
+            <h2>Portfolio Performance</h2>
+            <div class="chart-container">
+                <canvas id="performanceChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Trading Statistics -->
+        <section class="stats-section">
+            <h2>Trading Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Trades</div>
+                    <div class="stat-value" id="totalTrades">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Win Rate</div>
+                    <div class="stat-value" id="winRate">0%</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Sharpe Ratio</div>
+                    <div class="stat-value" id="sharpeRatio">0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Open Positions</div>
+                    <div class="stat-value" id="openPositions">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Profit Factor</div>
+                    <div class="stat-value" id="profitFactor">0.00</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Win</div>
+                    <div class="stat-value" id="avgWin">$0.00</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Open Positions -->
+        <section class="positions-section">
+            <h2>Open Positions</h2>
+            <div class="table-container">
+                <table id="positionsTable">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Entry Price</th>
+                            <th>Current Price</th>
+                            <th>Quantity</th>
+                            <th>Leverage</th>
+                            <th>PnL</th>
+                            <th>PnL %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positionsBody">
+                        <tr><td colspan="8" class="empty-state">No open positions</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Recent Trades -->
+        <section class="trades-section">
+            <h2>Recent Trades</h2>
+            <div class="table-container">
+                <table id="tradesTable">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>Leverage</th>
+                            <th>PnL</th>
+                            <th>PnL %</th>
+                            <th>Strategy</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradesBody">
+                        <tr><td colspan="9" class="empty-state">No trades yet</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Recent Decisions -->
+        <section class="decisions-section">
+            <h2>Recent Decisions</h2>
+            <div class="table-container">
+                <table id="decisionsTable">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Asset</th>
+                            <th>Action</th>
+                            <th>Confidence</th>
+                            <th>Size %</th>
+                            <th>Leverage</th>
+                            <th>Reason</th>
+                            <th>Regime</th>
+                        </tr>
+                    </thead>
+                    <tbody id="decisionsBody">
+                        <tr><td colspan="8" class="empty-state">No decisions yet</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Circuit Breaker Alert -->
+        <div class="alert-banner" id="circuitBreakerAlert" style="display: none;">
+            <span class="alert-icon">⚠️</span>
+            <span class="alert-text" id="circuitBreakerText"></span>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
+
