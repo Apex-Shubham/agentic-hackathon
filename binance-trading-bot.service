@@ -1,0 +1,30 @@
+[Unit]
+Description=Binance Futures Trading Bot (14-Day Competition)
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/trading-bot
+Environment=PATH=/path/to/trading-bot/venv/bin
+ExecStart=/path/to/trading-bot/venv/bin/python3 /path/to/trading-bot/run_with_restart.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/path/to/trading-bot/logs/bot_service.log
+StandardError=append:/path/to/trading-bot/logs/bot_service_error.log
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target
+
+# Instructions:
+# 1. Replace YOUR_USERNAME with your Linux username
+# 2. Replace /path/to/trading-bot with actual bot directory
+# 3. Save to /etc/systemd/system/binance-trading-bot.service
+# 4. Run: sudo systemctl daemon-reload
+# 5. Run: sudo systemctl enable binance-trading-bot
+# 6. Run: sudo systemctl start binance-trading-bot
+

@@ -19,7 +19,7 @@ class HealthMonitor:
         self.consecutive_errors = 0
         self.api_health = {
             'binance': True,
-            'groq': True
+            'openrouter': True
         }
         self.last_health_check = datetime.now(timezone.utc)
         self.recovery_attempts = 0
@@ -132,8 +132,8 @@ class HealthMonitor:
         # Try to recover based on service
         if service == 'binance':
             self._recover_binance_connection()
-        elif service == 'groq':
-            self._recover_deepseek_connection()
+        elif service == 'openrouter':
+            self._recover_openrouter_connection()
         
         # If recovery successful, mark as healthy
         # This will be updated on next successful call
@@ -158,9 +158,9 @@ class HealthMonitor:
             print(f"   ❌ Error recovering Binance connection: {e}")
             return False
     
-    def _recover_deepseek_connection(self):
-        """Attempt to recover DeepSeek connection"""
-        print("   Attempting to recover DeepSeek connection...")
+    def _recover_openrouter_connection(self):
+        """Attempt to recover OpenRouter connection"""
+        print("   Attempting to recover OpenRouter connection...")
         
         try:
             # Simple test query
@@ -168,14 +168,14 @@ class HealthMonitor:
             agent = get_deepseek_agent()
             
             # Try a simple decision
-            test_decision = agent._get_hold_decision("Connection test")
+            test_decision = agent._hold_decision("Connection test")
             if test_decision:
-                self.api_health['groq'] = True
-                print("   ✅ DeepSeek connection recovered")
+                self.api_health['openrouter'] = True
+                print("   ✅ OpenRouter connection recovered")
                 return True
             
         except Exception as e:
-            print(f"   ❌ Error recovering DeepSeek connection: {e}")
+            print(f"   ❌ Error recovering OpenRouter connection: {e}")
             return False
     
     def validate_data_integrity(self, data: Dict) -> bool:
@@ -244,12 +244,12 @@ class HealthMonitor:
                         continue
                     else:
                         return False
-                elif service == 'deepseek':
-                    if self._recover_deepseek_connection():
+                elif service == 'openrouter':
+                    if self._recover_openrouter_connection():
                         continue
                     else:
-                        # DeepSeek down is not fatal - we have fallback
-                        print("   ℹ️ DeepSeek unavailable, will use fallback logic")
+                        # OpenRouter down is not fatal - we have fallback
+                        print("   ℹ️ OpenRouter unavailable, will use fallback logic")
         
         # Clear error counters if we made it this far
         self.consecutive_errors = 0

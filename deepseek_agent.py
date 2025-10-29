@@ -1,19 +1,20 @@
 """
-DeepSeek LLM Agent (via Groq)
-Integrates with Groq-hosted DeepSeek/Mixtral for AI-powered trading decisions
+LLM Agent (via OpenRouter)
+Integrates with OpenRouter for AI-powered trading decisions
 """
 import json
+import os
 import time
 from typing import Dict
 
 import requests
 from config import (
-    GROQ_API_KEY,
-    GROQ_API_URL,
-    GROQ_MODEL,
-    GROQ_TEMPERATURE,
-    GROQ_MAX_TOKENS,
-    GROQ_TIMEOUT,
+    OPENROUTER_API_KEY,
+    OPENROUTER_API_URL,
+    OPENROUTER_MODEL,
+    OPENROUTER_TEMPERATURE,
+    OPENROUTER_MAX_TOKENS,
+    OPENROUTER_TIMEOUT,
     SYSTEM_PROMPT,
     MAX_API_RETRIES,
     RETRY_BACKOFF_MULTIPLIER,
@@ -21,12 +22,12 @@ from config import (
 
 
 class DeepSeekAgent:
-    """AI agent using Groq (DeepSeek/Mixtral) for trading decisions"""
+    """AI agent using OpenRouter for trading decisions"""
 
     def __init__(self):
-        self.api_key = GROQ_API_KEY
-        self.api_url = GROQ_API_URL
-        self.model = GROQ_MODEL
+        self.api_key = OPENROUTER_API_KEY
+        self.api_url = OPENROUTER_API_URL
+        self.model = OPENROUTER_MODEL
         self.decision_cache: Dict[str, Dict] = {}
         self.total_api_calls = 0
         self.failed_api_calls = 0
@@ -55,11 +56,12 @@ class DeepSeekAgent:
                 analyzer = get_analyzer()
                 context = analyzer.build_llm_context(market_data, portfolio, day_number)
 
-            # Query Groq
-            response_text = self._query_groq(context)
+            # Query OpenRouter
+            response_text = self._query_openrouter(context)
 
-            # Parse & validate
+            # Parse & normalize, then validate
             decision = self._parse_json_response(response_text)
+            decision = self._normalize_decision(decision)
             if self._validate_decision(decision):
                 return decision
             else:
@@ -73,8 +75,8 @@ class DeepSeekAgent:
     # --------------------------------------------------------------------- #
     # PRIVATE HELPERS
     # --------------------------------------------------------------------- #
-    def _query_groq(self, prompt: str) -> str:
-        """Call Groq with exponential back-off."""
+    def _query_openrouter(self, prompt: str) -> str:
+        """Call OpenRouter with exponential back-off."""
         self.total_api_calls += 1
 
         payload = {
@@ -83,8 +85,8 @@ class DeepSeekAgent:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            "temperature": GROQ_TEMPERATURE,
-            "max_tokens": GROQ_MAX_TOKENS,
+            "temperature": OPENROUTER_TEMPERATURE,
+            "max_tokens": OPENROUTER_MAX_TOKENS,
             "response_format": {"type": "json_object"},
         }
 
@@ -95,9 +97,12 @@ class DeepSeekAgent:
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
+                        # Optional but recommended per OpenRouter docs
+                        "HTTP-Referer": os.getenv("OPENROUTER_REFERER", "http://localhost"),
+                        "X-Title": os.getenv("OPENROUTER_TITLE", "AI Trading Bot"),
                     },
                     json=payload,
-                    timeout=GROQ_TIMEOUT,
+                    timeout=OPENROUTER_TIMEOUT,
                 )
 
                 if resp.status_code == 200:
@@ -105,13 +110,13 @@ class DeepSeekAgent:
                     return data["choices"][0]["message"]["content"]
 
                 # non-200 → log & retry
-                err = f"Groq API error {resp.status_code}: {resp.text}"
+                err = f"OpenRouter API error {resp.status_code}: {resp.text}"
                 print(err)
 
             except requests.exceptions.Timeout:
-                print(f"Groq timeout (attempt {attempt + 1}/{MAX_API_RETRIES})")
+                print(f"OpenRouter timeout (attempt {attempt + 1}/{MAX_API_RETRIES})")
             except Exception as exc:  # pylint: disable=broad-except
-                print(f"Groq request exception: {exc}")
+                print(f"OpenRouter request exception: {exc}")
 
             # back-off before next try
             if attempt < MAX_API_RETRIES - 1:
@@ -119,7 +124,7 @@ class DeepSeekAgent:
                 print(f"Retrying in {wait}s...")
                 time.sleep(wait)
 
-        raise RuntimeError("Groq API max retries exceeded")
+        raise RuntimeError("OpenRouter API max retries exceeded")
 
     # --------------------------------------------------------------------- #
     def _parse_json_response(self, text: str) -> Dict:
@@ -217,6 +222,58 @@ class DeepSeekAgent:
         return True
 
     # --------------------------------------------------------------------- #
+    def _normalize_decision(self, decision: Dict) -> Dict:
+        """Fill missing fields with safe defaults and map alternate keys."""
+        if not isinstance(decision, dict):
+            return self._hold_decision("Invalid decision format")
+
+        # Map alternate keys
+        if "position_size_percent" not in decision:
+            if "position_size" in decision:
+                decision["position_size_percent"] = decision.get("position_size")
+            elif "size_percent" in decision:
+                decision["position_size_percent"] = decision.get("size_percent")
+
+        # Safe defaults
+        action = decision.get("action", "HOLD")
+        try:
+            confidence = float(decision.get("confidence", 0))
+        except Exception:
+            confidence = 0
+        # If size missing, derive 1-10 from confidence
+        if decision.get("position_size_percent") in (None, "", []):
+            derived_size = max(1, min(10, int(confidence // 10)))
+            decision["position_size_percent"] = derived_size
+
+        decision.setdefault("leverage", 2)
+        decision.setdefault("entry_reason", "Auto-normalized")
+        decision.setdefault("stop_loss_percent", 4)
+        decision.setdefault("take_profit_percent", 12)
+        decision.setdefault("urgency", "LOW")
+        decision["action"] = action if action in {"LONG", "SHORT", "CLOSE", "HOLD"} else "HOLD"
+
+        # Clamp ranges
+        decision["confidence"] = max(0, min(100, float(confidence)))
+        try:
+            decision["position_size_percent"] = max(0, min(10, float(decision["position_size_percent"])))
+        except Exception:
+            decision["position_size_percent"] = 1
+        try:
+            decision["leverage"] = max(1, min(5, int(decision["leverage"])))
+        except Exception:
+            decision["leverage"] = 2
+        try:
+            decision["stop_loss_percent"] = max(2, min(8, float(decision["stop_loss_percent"])))
+        except Exception:
+            decision["stop_loss_percent"] = 4
+        try:
+            decision["take_profit_percent"] = max(5, min(30, float(decision["take_profit_percent"])))
+        except Exception:
+            decision["take_profit_percent"] = 12
+
+        return decision
+
+    # --------------------------------------------------------------------- #
     def _hold_decision(self, reason: str) -> Dict:
         return {
             "action": "HOLD",
@@ -231,7 +288,7 @@ class DeepSeekAgent:
 
     # --------------------------------------------------------------------- #
     def get_fallback_decision(self, market_data: Dict, portfolio: Dict) -> Dict:
-        """Simple rule-based fallback when Groq is unreachable."""
+        """Simple rule-based fallback when OpenRouter is unreachable."""
         print("Using fallback decision logic")
         for pos in portfolio.get("positions", []):
             if pos.get("pnl_percent", 0) < -5:

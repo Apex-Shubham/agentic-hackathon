@@ -6,7 +6,11 @@ from typing import Dict, Tuple
 from datetime import datetime, timedelta, timezone
 from config import (
     INITIAL_CAPITAL, MAX_DRAWDOWN, MAX_LEVERAGE, MAX_POSITION_SIZE,
-    MAX_OPEN_POSITIONS, CIRCUIT_BREAKERS, MIN_CONFIDENCE
+    MAX_OPEN_POSITIONS, CIRCUIT_BREAKERS, MIN_CONFIDENCE,
+    ENABLE_VOLATILITY_TRADING, SCALP_POSITION_SIZE,
+    BASE_LEVERAGE, HIGH_CONFIDENCE_LEVERAGE, LEVERAGE_THRESHOLD,
+    MAX_POSITIONS_PER_SYMBOL, MAX_CORRELATED_POSITIONS, MAX_PORTFOLIO_RISK,
+    HIGH_CONFIDENCE_SIZE, MEDIUM_CONFIDENCE_SIZE, LOW_CONFIDENCE_SIZE
 )
 
 
@@ -71,114 +75,52 @@ class RiskManager:
     
     def calculate_position_size(
         self, 
+        balance: float,
         confidence: float, 
-        regime: str, 
-        day_number: int, 
-        current_drawdown: float
-    ) -> float:
+        market_data: Dict = None
+    ) -> Dict:
         """
-        Calculate optimal position size based on multiple factors
-        Returns: position size as decimal (e.g., 0.08 for 8%)
+        Calculate optimal position size based on confidence
+        Returns: dict with 'size', 'leverage', and 'size_percent'
         """
-        base_size = 0.08  # 8% base position size
+        from config import HIGH_CONFIDENCE_SIZE, MEDIUM_CONFIDENCE_SIZE, LOW_CONFIDENCE_SIZE
+        from config import HIGH_CONFIDENCE_LEVERAGE, BASE_LEVERAGE
         
-        # Confidence multiplier (0.5 to 1.5)
-        conf_mult = 0.5 + (confidence / 100)
+        # Confidence-based sizing
+        if confidence >= 85:
+            size_percent = HIGH_CONFIDENCE_SIZE
+            leverage = HIGH_CONFIDENCE_LEVERAGE
+        elif confidence >= 75:
+            size_percent = MEDIUM_CONFIDENCE_SIZE
+            leverage = BASE_LEVERAGE
+        else:
+            size_percent = LOW_CONFIDENCE_SIZE
+            leverage = BASE_LEVERAGE
         
-        # Regime multiplier
-        regime_multipliers = {
-            'STRONG_TREND_UP': 1.3,
-            'STRONG_TREND_DOWN': 1.3,
-            'BREAKOUT_UP': 1.4,
-            'BREAKOUT_DOWN': 1.4,
-            'MOMENTUM': 1.2,
-            'RANGING': 0.7,
-            'VOLATILE': 0.8,
-            'NEUTRAL': 0.9,
-            'UNKNOWN': 0.5
+        position_size = balance * size_percent
+        
+        return {
+            'size': position_size,
+            'leverage': leverage,
+            'size_percent': size_percent * 100
         }
-        regime_mult = regime_multipliers.get(regime, 0.9)
-        
-        # Time pressure multiplier (increase aggression as competition progresses)
-        if day_number <= 5:
-            time_mult = 1.0  # Conservative early on
-        elif day_number <= 10:
-            time_mult = 1.15  # Moderate aggression
-        else:
-            time_mult = 1.25  # Final push
-        
-        # Drawdown protection multiplier
-        if current_drawdown < 0.15:
-            dd_mult = 1.0  # No drawdown issues
-        elif current_drawdown < 0.25:
-            dd_mult = 0.8  # Slight reduction
-        elif current_drawdown < 0.30:
-            dd_mult = 0.5  # Significant reduction
-        elif current_drawdown < 0.35:
-            dd_mult = 0.3  # Extreme caution
-        else:
-            dd_mult = 0.2  # Minimal sizing
-        
-        # Circuit breaker adjustments
-        if self.circuit_breaker_level == 'LEVEL_1':
-            dd_mult *= 0.6  # Further reduce at Level 1
-        elif self.circuit_breaker_level == 'LEVEL_2':
-            dd_mult *= 0.4  # Minimal at Level 2
-        elif self.circuit_breaker_level == 'LEVEL_3':
-            dd_mult *= 0.25  # Tiny positions only at Level 3
-        
-        # Calculate final position size
-        position_size = base_size * conf_mult * regime_mult * time_mult * dd_mult
-        
-        # Apply hard limit
-        position_size = min(position_size, MAX_POSITION_SIZE)
-        
-        # Minimum viable size check
-        if position_size < 0.01:  # Less than 1%
-            position_size = 0.0  # Don't trade if too small
-        
-        return round(position_size, 4)
     
     def calculate_optimal_leverage(self, confidence: float, regime: str) -> int:
         """
-        Calculate optimal leverage based on confidence and market regime
-        Returns: leverage (1-5)
+        Dynamic leverage based on confidence only.
+        - < LEVERAGE_THRESHOLD: BASE_LEVERAGE
+        - >= LEVERAGE_THRESHOLD: HIGH_CONFIDENCE_LEVERAGE
+        Applies circuit breaker and MAX_LEVERAGE caps.
         """
-        # Base leverage from confidence
-        if confidence >= 90:
-            base_leverage = 5
-        elif confidence >= 85:
-            base_leverage = 4
-        elif confidence >= 80:
-            base_leverage = 3
-        elif confidence >= 75:
-            base_leverage = 3
-        else:
-            base_leverage = 2
+        leverage = HIGH_CONFIDENCE_LEVERAGE if confidence >= LEVERAGE_THRESHOLD else BASE_LEVERAGE
         
-        # Adjust for regime
-        regime_leverage = {
-            'STRONG_TREND_UP': 0,
-            'STRONG_TREND_DOWN': 0,
-            'BREAKOUT_UP': 0,
-            'BREAKOUT_DOWN': 0,
-            'MOMENTUM': -1,
-            'RANGING': -2,
-            'VOLATILE': -2,
-            'NEUTRAL': -1,
-            'UNKNOWN': -3
-        }
-        
-        leverage = base_leverage + regime_leverage.get(regime, -1)
-        
-        # Apply circuit breaker limits
+        # Apply circuit breaker limits if active
         if self.circuit_breaker_level:
             max_cb_leverage = CIRCUIT_BREAKERS[self.circuit_breaker_level]['max_leverage']
             leverage = min(leverage, max_cb_leverage)
         
-        # Enforce hard limits
+        # Enforce global hard limit
         leverage = max(1, min(leverage, MAX_LEVERAGE))
-        
         return leverage
     
     def update_portfolio_metrics(self, current_portfolio_value: float):
@@ -210,7 +152,8 @@ class RiskManager:
         decision: Dict, 
         portfolio: Dict, 
         position_size: float,
-        leverage: int
+        leverage: int,
+        symbol: str = None
     ) -> Tuple[bool, str]:
         """
         Validate a trade before execution
@@ -233,6 +176,48 @@ class RiskManager:
         open_positions = len(portfolio.get('positions', []))
         if open_positions >= MAX_OPEN_POSITIONS and decision['action'] in ['LONG', 'SHORT']:
             return False, f"Max positions ({MAX_OPEN_POSITIONS}) already open"
+        
+        # Get symbol (from parameter or extract from decision/portfolio)
+        if not symbol:
+            # Try to extract from decision or portfolio positions
+            symbol = decision.get('symbol') or portfolio.get('positions', [{}])[0].get('symbol') if portfolio.get('positions') else None
+        
+        # Portfolio risk validation (only for new LONG/SHORT trades)
+        if decision['action'] in ['LONG', 'SHORT'] and symbol:
+            positions = portfolio.get('positions', [])
+            
+            # Check 1: No pyramiding (max 1 position per symbol)
+            existing_symbol_positions = [p for p in positions if p.get('symbol') == symbol]
+            if len(existing_symbol_positions) >= MAX_POSITIONS_PER_SYMBOL:
+                return False, f"Symbol {symbol} already has {len(existing_symbol_positions)} position(s) (max {MAX_POSITIONS_PER_SYMBOL})"
+            
+            # Check 2: Correlation limits (max 3 correlated crypto positions)
+            crypto_symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
+            crypto_positions = [p for p in positions if p.get('symbol') in crypto_symbols]
+            if symbol in crypto_symbols and len(crypto_positions) >= MAX_CORRELATED_POSITIONS:
+                return False, f"Max correlated crypto positions ({MAX_CORRELATED_POSITIONS}) already open"
+            
+            # Check 3: Total portfolio risk
+            # Risk = position size as % of total portfolio value
+            portfolio_value = portfolio.get('total_value', INITIAL_CAPITAL)
+            new_trade_risk = position_size  # position_size is already a decimal (0.05 = 5%)
+            
+            # Calculate total risk from existing positions
+            # Risk for each position = (position_value / portfolio_value)
+            total_risk = 0.0
+            for p in positions:
+                pos_quantity = abs(p.get('quantity', 0))
+                pos_price = p.get('entry_price') or p.get('current_price', 0)
+                if pos_price > 0:
+                    position_value = pos_quantity * pos_price
+                    position_risk = position_value / max(portfolio_value, 1)
+                    total_risk += position_risk
+            
+            # Add new trade risk (new position_size as % of portfolio)
+            total_risk_with_new = total_risk + new_trade_risk
+            
+            if total_risk_with_new > MAX_PORTFOLIO_RISK:
+                return False, f"Total portfolio risk {total_risk_with_new:.1%} exceeds limit {MAX_PORTFOLIO_RISK:.1%} (current: {total_risk:.1%}, new trade: {new_trade_risk:.1%})"
         
         # Check confidence threshold
         if decision['confidence'] < MIN_CONFIDENCE:
@@ -281,10 +266,10 @@ class RiskManager:
 # Global risk manager instance
 _risk_manager_instance = None
 
-def get_risk_manager() -> RiskManager:
-    """Get or create risk manager instance"""
+def get_risk_manager(initial_capital: float = INITIAL_CAPITAL) -> RiskManager:
+    """Get or create risk manager instance. Optionally set initial capital on first create."""
     global _risk_manager_instance
     if _risk_manager_instance is None:
-        _risk_manager_instance = RiskManager()
+        _risk_manager_instance = RiskManager(initial_capital=initial_capital)
     return _risk_manager_instance
 

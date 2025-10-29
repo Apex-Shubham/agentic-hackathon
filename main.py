@@ -1,6 +1,6 @@
 """
-Main Trading Bot Orchestrator - ENHANCED VERSION
-Improved trading signals with smart entry and exit logic
+Main Trading Bot Orchestrator - FIXED VERSION
+Uses actual Binance balance and proper competition date checking
 """
 import sys
 import time
@@ -11,7 +11,8 @@ from typing import Dict
 
 from config import (
     validate_config, COMPETITION_START_DATE, COMPETITION_DURATION_DAYS,
-    CHECK_INTERVAL_SECONDS, TRADING_ASSETS, INITIAL_CAPITAL, MIN_CONFIDENCE
+    CHECK_INTERVAL_SECONDS, TRADING_ASSETS, get_binance_balance, MIN_CONFIDENCE,
+    INITIAL_CAPITAL, MAX_OPEN_POSITIONS, MAX_POSITIONS_PER_SYMBOL
 )
 from data_pipeline import DataPipeline
 from market_analyzer import get_analyzer
@@ -38,13 +39,19 @@ class TradingBot:
             print(f"❌ Configuration error: {e}")
             sys.exit(1)
         
+        # FIXED: Get actual balance from Binance instead of using hardcoded value
+        self.initial_capital = get_binance_balance()
+        print(f"💰 Fetched Balance from Binance: ${self.initial_capital:,.2f}")
+        
         # Initialize modules
         self.data_pipeline = DataPipeline()
         self.analyzer = get_analyzer()
         self.deepseek_agent = get_deepseek_agent()
-        self.risk_manager = get_risk_manager()
+        
+        # FIXED: Pass actual balance to risk manager
+        self.risk_manager = get_risk_manager(initial_capital=self.initial_capital)
         self.executor = get_executor()
-        self.logger = get_logger()
+        self.logger = get_logger(initial_capital=self.initial_capital)
         self.health_monitor = get_health_monitor()
         
         # Competition tracking
@@ -52,12 +59,15 @@ class TradingBot:
         self.competition_start = datetime.fromisoformat(COMPETITION_START_DATE.replace('Z', '+00:00'))
         self.competition_end = self.competition_start + timedelta(days=COMPETITION_DURATION_DAYS)
         
+        # FIXED: Calculate days elapsed properly
+        days_elapsed = (self.start_time - self.competition_start).total_seconds() / 86400
+        
         # State
         self.running = True
         self.cycle_count = 0
         
-        print(f"📅 Competition: {COMPETITION_DURATION_DAYS} days")
-        print(f"💰 Initial Capital: ${INITIAL_CAPITAL:,.2f}")
+        print(f"📅 Competition: Day {days_elapsed:.3f} of {COMPETITION_DURATION_DAYS}")
+        print(f"💰 Initial Capital: ${self.initial_capital:,.2f}")
         print(f"📊 Trading Assets: {', '.join(TRADING_ASSETS)}")
         print(f"⏱️  Check Interval: {CHECK_INTERVAL_SECONDS}s")
         print(f"🎯 Enhanced Signals: Multi-confirmation + Smart Exits")
@@ -200,35 +210,49 @@ class TradingBot:
         regime = market_data.get('regime', 'UNKNOWN')
         indicators = market_data.get('indicators', {})
         
-        # Check if we already have a position in this asset
-        existing_position = None
-        for pos in portfolio.get('positions', []):
+        # Check existing positions for this asset (PYRAMIDING ALLOWED - max 2 per symbol)
+        existing_positions = []
+        open_positions = portfolio.get('positions', [])
+        for pos in open_positions:
             if pos['symbol'] == asset:
-                existing_position = pos
-                break
+                existing_positions.append(pos)
+        
+        # Count positions per symbol
+        positions_on_symbol = len(existing_positions)
+        from config import MAX_POSITIONS_PER_SYMBOL
+        
+        if existing_positions:
+            print(f"\n🔍 Checking existing positions for {asset}:")
+            for i, pos in enumerate(existing_positions, 1):
+                print(f"   Position #{i}: {pos.get('side', 'UNKNOWN')} | PnL: {pos.get('pnl_percent', 0):+.2f}%")
+            print(f"   Total positions on {asset}: {positions_on_symbol}/{MAX_POSITIONS_PER_SYMBOL}")
         
         # ========================================
-        # ENHANCED EXIT LOGIC
+        # ENHANCED EXIT LOGIC (only for worst performing position if multiple)
         # ========================================
-        if existing_position:
-            pnl = existing_position['pnl_percent']
+        if existing_positions:
+            # Find worst performing position for exit signals
+            worst_position = min(existing_positions, key=lambda p: p.get('pnl_percent', 0))
+            pnl = worst_position['pnl_percent']
             
             # Emergency stop loss at -5%
             if pnl < -5:
-                print(f"🛑 Emergency Stop Loss: Closing {asset} at {pnl:.1f}%")
+                print(f"🛑 Emergency Stop Loss: Closing worst position on {asset} at {pnl:.1f}%")
                 result = self.executor.close_position(asset)
                 self.logger.log_trade(result)
-                return
+                # Continue to allow pyramiding if under limit
+                if positions_on_symbol - 1 >= MAX_POSITIONS_PER_SYMBOL:
+                    return  # Can't pyramid if still at limit after closing
             
-            # Check enhanced exit signals from market analyzer
+            # Check enhanced exit signals from market analyzer (on worst position)
             should_exit, exit_reason, exit_confidence = self.analyzer.should_exit_position(
-                existing_position, market_data, indicators
+                worst_position, market_data, indicators
             )
             
             if should_exit and exit_confidence >= 75:
                 print(f"\n📉 SMART EXIT SIGNAL for {asset}")
                 print(f"   Exit Confidence: {exit_confidence}%")
-                print(f"   Current PnL: {pnl:+.2f}%")
+                print(f"   Closing position with PnL: {pnl:+.2f}%")
                 print(f"   Reason: {exit_reason}")
                 
                 result = self.executor.close_position(asset)
@@ -242,17 +266,27 @@ class TradingBot:
                 self.logger.log_decision(exit_decision, market_data, result)
                 
                 if result['status'] == 'SUCCESS':
-                    self.logger.log_trade(result)
-                return
-            
-            # Don't open new position if we already have one and no exit signal
+                    strategy = 'EXIT_SIGNAL'  # Mark as exit signal strategy
+                    regime = market_data.get('regime', 'UNKNOWN')
+                    self.logger.log_trade(result, strategy=strategy, regime=regime, confidence=exit_confidence)
+                    # Continue to allow pyramiding if under limit after close
+                    if positions_on_symbol - 1 >= MAX_POSITIONS_PER_SYMBOL:
+                        return  # Can't pyramid if still at limit after closing
+                else:
+                    # If close failed, still allow pyramiding if under limit
+                    pass
+        
+        # ========================================
+        # ENHANCED ENTRY LOGIC (PYRAMIDING ALLOWED)
+        # ========================================
+        
+        # Check if we can add more positions (pyramiding check)
+        if positions_on_symbol >= MAX_POSITIONS_PER_SYMBOL:
+            print(f"   ⚠️ Already at max positions ({positions_on_symbol}/{MAX_POSITIONS_PER_SYMBOL}) for {asset}")
+            print(f"   💡 Will skip pyramiding - waiting for exit signals or position closure")
             return
         
-        # ========================================
-        # ENHANCED ENTRY LOGIC
-        # ========================================
-        
-        # Get LLM decision
+        # Get LLM decision (LLM will evaluate if pyramiding is profitable)
         try:
             decision = self.deepseek_agent.get_decision(market_data, portfolio, day_number)
         except Exception as e:
@@ -260,40 +294,74 @@ class TradingBot:
             self.health_monitor.handle_api_failure('deepseek', e)
             decision = self.deepseek_agent.get_fallback_decision(market_data, portfolio)
         
-        # Skip if HOLD or low confidence
-        if decision['action'] == 'HOLD' or decision['confidence'] < MIN_CONFIDENCE:
+        # Skip if HOLD or low confidence (lower threshold in volatile markets)
+        from config import MIN_CONFIDENCE_VOLATILE
+        min_conf = MIN_CONFIDENCE_VOLATILE if market_data.get('regime') == 'VOLATILE' else MIN_CONFIDENCE
+        if decision['action'] == 'HOLD' or decision['confidence'] < min_conf:
             return
         
-        # Calculate position size
-        position_size = self.risk_manager.calculate_position_size(
-            decision['confidence'],
-            regime,
-            day_number,
-            self.risk_manager.current_drawdown
+        # Calculate position size and leverage (confidence-based)
+        portfolio_value = portfolio.get('total_value', INITIAL_CAPITAL)
+        position_info = self.risk_manager.calculate_position_size(
+            balance=portfolio_value,
+            confidence=decision['confidence'],
+            market_data=market_data
         )
+        
+        # Extract size and leverage from result
+        position_size = position_info['size_percent'] / 100.0  # Convert back to decimal for validation
+        leverage = position_info['leverage']
+        position_size_dollars = position_info['size']
         
         # Skip if position size too small
         if position_size == 0:
             return
         
-        # Calculate leverage
-        leverage = self.risk_manager.calculate_optimal_leverage(
-            decision['confidence'],
-            regime
-        )
+        # Detailed logging before validation
+        open_positions = portfolio.get('positions', [])
+        available_balance = portfolio.get('available_balance', 0)
+        positions_on_this_symbol = len([p for p in open_positions if p.get('symbol') == asset])
+        
+        print(f"\n🔍 Trade validation for {asset}:")
+        if positions_on_this_symbol > 0:
+            print(f"   🏗️  PYRAMIDING: Adding position #{positions_on_this_symbol + 1} (already have {positions_on_this_symbol})")
+            for i, pos in enumerate([p for p in open_positions if p.get('symbol') == asset], 1):
+                print(f"      Existing #{i}: {pos.get('side', 'UNKNOWN')} | PnL: {pos.get('pnl_percent', 0):+.2f}%")
+        else:
+            print(f"   📊 NEW POSITION: No existing positions on {asset}")
+        print(f"   Total portfolio positions: {len(open_positions)}/{MAX_OPEN_POSITIONS}")
+        print(f"   Positions on {asset}: {positions_on_this_symbol}/{MAX_POSITIONS_PER_SYMBOL}")
+        print(f"   Confidence: {decision['confidence']:.1f}% (threshold: {min_conf}%)")
+        print(f"   Position size: ${position_size_dollars:,.2f} ({position_size:.1%})")
+        print(f"   Leverage: {leverage}x")
+        print(f"   Available balance: ${available_balance:,.2f}")
+        
+        # Check each rejection reason
+        if positions_on_this_symbol >= MAX_POSITIONS_PER_SYMBOL:
+            print(f"   ❌ REJECTED: Max positions per symbol ({MAX_POSITIONS_PER_SYMBOL}) reached")
+        elif len(open_positions) >= MAX_OPEN_POSITIONS:
+            print(f"   ❌ REJECTED: Max total positions ({MAX_OPEN_POSITIONS}) reached")
+        elif decision['confidence'] < min_conf:
+            print(f"   ❌ REJECTED: Confidence too low")
+        elif position_size_dollars > available_balance * 0.2:
+            print(f"   ❌ REJECTED: Position too large (>20% of available balance)")
+        else:
+            print(f"   ✅ Passing validation checks")
         
         # Validate trade
         is_valid, validation_msg = self.risk_manager.validate_trade(
-            decision, portfolio, position_size, leverage
+            decision, portfolio, position_size, leverage, symbol=asset
         )
         
         if not is_valid:
-            print(f"⚠️ Trade validation failed for {asset}: {validation_msg}")
+            print(f"   ❌ Validation failed: {validation_msg}")
             return
+        else:
+            print(f"   ✅ Validation passed")
         
         # Execute trade
         if decision['action'] in ['LONG', 'SHORT']:
-            position_size_dollars = portfolio['total_value'] * position_size
+            # Use position_size_dollars already calculated from position_info
             
             print(f"\n📈 EXECUTING {decision['action']} on {asset}")
             print(f"   Confidence: {decision['confidence']:.0f}%")
@@ -301,6 +369,31 @@ class TradingBot:
             print(f"   Leverage: {leverage}x")
             print(f"   Reason: {decision['entry_reason']}")
             
+            # Additional validation checks before execution
+            existing_on_symbol = [p for p in open_positions if p.get('symbol') == asset]
+            if existing_on_symbol:
+                print(f"   🏗️  PYRAMIDING: Adding to existing {len(existing_on_symbol)} position(s) on {asset}")
+            else:
+                print(f"   📊 NEW POSITION: First position on {asset}")
+            
+            if len(open_positions) >= MAX_OPEN_POSITIONS:
+                print(f"   ⚠️ WARNING: At max total positions ({len(open_positions)}/{MAX_OPEN_POSITIONS})")
+            else:
+                print(f"   ✅ Total position limit OK: {len(open_positions)}/{MAX_OPEN_POSITIONS}")
+            
+            if len(existing_on_symbol) + 1 > MAX_POSITIONS_PER_SYMBOL:
+                print(f"   ⚠️ WARNING: Will exceed per-symbol limit (will be {len(existing_on_symbol) + 1}/{MAX_POSITIONS_PER_SYMBOL})")
+            else:
+                print(f"   ✅ Per-symbol limit OK: {len(existing_on_symbol)} → {len(existing_on_symbol) + 1}/{MAX_POSITIONS_PER_SYMBOL}")
+            
+            print(f"   ✅ Proceeding with execution...")
+            
+            # In high volatility, tighten SL/TP as per config
+            if market_data.get('is_high_volatility'):
+                from config import SCALP_STOP_LOSS, SCALP_TAKE_PROFIT
+                decision['stop_loss_percent'] = SCALP_STOP_LOSS * 100 if SCALP_STOP_LOSS < 1 else SCALP_STOP_LOSS
+                decision['take_profit_percent'] = SCALP_TAKE_PROFIT * 100 if SCALP_TAKE_PROFIT < 1 else SCALP_TAKE_PROFIT
+
             result = self.executor.execute_trade(
                 asset, decision, position_size_dollars, leverage
             )
@@ -309,7 +402,11 @@ class TradingBot:
             self.logger.log_decision(decision, market_data, result)
             
             if result['status'] == 'SUCCESS':
-                self.logger.log_trade(result)
+                # Extract strategy and regime for performance tracking
+                strategy = decision.get('strategy') or 'unknown'
+                regime = market_data.get('regime', 'UNKNOWN')
+                confidence = decision.get('confidence')
+                self.logger.log_trade(result, strategy=strategy, regime=regime, confidence=confidence)
                 self.risk_manager.total_trades_today += 1
                 # Update portfolio after successful trade so next asset can trade with updated margin
                 portfolio.update(self.executor.get_portfolio_status())
@@ -324,7 +421,10 @@ class TradingBot:
             self.logger.log_decision(decision, market_data, result)
             
             if result['status'] == 'SUCCESS':
-                self.logger.log_trade(result)
+                strategy = decision.get('strategy') or 'CLOSE'
+                regime = market_data.get('regime', 'UNKNOWN')
+                confidence = decision.get('confidence')
+                self.logger.log_trade(result, strategy=strategy, regime=regime, confidence=confidence)
     
     def _health_check(self) -> bool:
         """Perform health check"""
@@ -371,7 +471,8 @@ class TradingBot:
                 decision=decision,
                 portfolio=portfolio,
                 position_size=size_decimal,
-                leverage=INITIAL_TRADE_LEVERAGE
+                leverage=INITIAL_TRADE_LEVERAGE,
+                symbol=asset
             )
             if not is_valid:
                 print(f"⚠️ Forced trade blocked by validation: {msg}")

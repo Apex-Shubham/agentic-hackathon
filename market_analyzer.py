@@ -4,6 +4,7 @@ Improved trade setups with multi-confirmation signals and better risk/reward
 """
 from typing import Dict, List, Optional
 import json
+from analytics.performance_tracker import get_performance_tracker
 
 
 class MarketAnalyzer:
@@ -12,6 +13,7 @@ class MarketAnalyzer:
     def __init__(self):
         self.setup_history = []
         self.min_setup_confidence = 70  # Only consider setups with 70%+ confidence
+        self.perf_tracker = get_performance_tracker()
     
     def find_trade_setups(self, market_data: Dict) -> List[Dict]:
         """
@@ -19,6 +21,15 @@ class MarketAnalyzer:
         Returns list of potential setups with confidence scores
         """
         setups = []
+        # Build assessment scaffold
+        assessment = {
+            'symbol': None,
+            'regime': None,
+            'price': None,
+            'indicators_snapshot': {},
+            'strategy_checks': [],
+            'shortlisted': []
+        }
         
         if 'error' in market_data or not market_data.get('indicators'):
             return setups
@@ -27,36 +38,102 @@ class MarketAnalyzer:
         regime = market_data['regime']
         symbol = market_data['symbol']
         price = market_data['price']
+        assessment['symbol'] = symbol
+        assessment['regime'] = regime
+        assessment['price'] = price
+        # capture a compact snapshot of key indicators if present
+        for key in ['ema_9','ema_21','ema_50','rsi','macd_diff','bb_upper','bb_lower','atr','volume','volume_ratio']:
+            if key in indicators:
+                assessment['indicators_snapshot'][key] = indicators.get(key)
         
         # Setup 1: Enhanced Trend Following with Multi-Timeframe Confirmation
         trend_setup = self._identify_trend_setup_enhanced(indicators, regime, symbol, price)
+        assessment['strategy_checks'].append({
+            'name': 'trend_following',
+            'accepted': bool(trend_setup and trend_setup.get('confidence', 0) >= self.min_setup_confidence),
+            'confidence': (trend_setup or {}).get('confidence', 0),
+            'direction': (trend_setup or {}).get('direction'),
+            'reasons': (trend_setup or {}).get('reasons')
+        })
         if trend_setup and trend_setup['confidence'] >= self.min_setup_confidence:
             setups.append(trend_setup)
         
         # Setup 2: Smart Breakout with Volume Confirmation
         breakout_setup = self._identify_breakout_setup_enhanced(indicators, regime, symbol, price, market_data)
+        assessment['strategy_checks'].append({
+            'name': 'breakout',
+            'accepted': bool(breakout_setup and breakout_setup.get('confidence', 0) >= self.min_setup_confidence),
+            'confidence': (breakout_setup or {}).get('confidence', 0),
+            'direction': (breakout_setup or {}).get('direction'),
+            'reasons': (breakout_setup or {}).get('reasons')
+        })
         if breakout_setup and breakout_setup['confidence'] >= self.min_setup_confidence:
             setups.append(breakout_setup)
         
         # Setup 3: Mean Reversion with Divergence Detection
         reversal_setup = self._identify_reversal_setup_enhanced(indicators, regime, symbol, price)
+        assessment['strategy_checks'].append({
+            'name': 'mean_reversion',
+            'accepted': bool(reversal_setup and reversal_setup.get('confidence', 0) >= self.min_setup_confidence),
+            'confidence': (reversal_setup or {}).get('confidence', 0),
+            'direction': (reversal_setup or {}).get('direction'),
+            'reasons': (reversal_setup or {}).get('reasons')
+        })
         if reversal_setup and reversal_setup['confidence'] >= self.min_setup_confidence:
             setups.append(reversal_setup)
         
         # Setup 4: Momentum with Trend Alignment
         momentum_setup = self._identify_momentum_setup_enhanced(indicators, regime, symbol, price, market_data)
+        assessment['strategy_checks'].append({
+            'name': 'momentum',
+            'accepted': bool(momentum_setup and momentum_setup.get('confidence', 0) >= self.min_setup_confidence),
+            'confidence': (momentum_setup or {}).get('confidence', 0),
+            'direction': (momentum_setup or {}).get('direction'),
+            'reasons': (momentum_setup or {}).get('reasons')
+        })
         if momentum_setup and momentum_setup['confidence'] >= self.min_setup_confidence:
             setups.append(momentum_setup)
         
         # Setup 5: NEW - Volatility Contraction Pattern
         volatility_setup = self._identify_volatility_breakout(indicators, regime, symbol, price, market_data)
+        assessment['strategy_checks'].append({
+            'name': 'volatility_breakout',
+            'accepted': bool(volatility_setup and volatility_setup.get('confidence', 0) >= self.min_setup_confidence),
+            'confidence': (volatility_setup or {}).get('confidence', 0),
+            'direction': (volatility_setup or {}).get('direction'),
+            'reasons': (volatility_setup or {}).get('reasons')
+        })
         if volatility_setup and volatility_setup['confidence'] >= self.min_setup_confidence:
             setups.append(volatility_setup)
         
         # Setup 6: NEW - EMA Crossover with Confirmation
         crossover_setup = self._identify_ema_crossover(indicators, regime, symbol, price)
+        assessment['strategy_checks'].append({
+            'name': 'ema_crossover',
+            'accepted': bool(crossover_setup and crossover_setup.get('confidence', 0) >= self.min_setup_confidence),
+            'confidence': (crossover_setup or {}).get('confidence', 0),
+            'direction': (crossover_setup or {}).get('direction'),
+            'reasons': (crossover_setup or {}).get('reasons')
+        })
         if crossover_setup and crossover_setup['confidence'] >= self.min_setup_confidence:
             setups.append(crossover_setup)
+
+        # Record shortlisted setups summary in assessment and write
+        assessment['shortlisted'] = [
+            {
+                'name': s.get('name'),
+                'direction': s.get('direction'),
+                'confidence': s.get('confidence'),
+                'stop_loss_percent': s.get('stop_loss_percent'),
+                'take_profit_percent': s.get('take_profit_percent')
+            }
+            for s in setups
+        ]
+        try:
+            from logger import get_logger
+            get_logger().log_assessment(assessment)
+        except Exception:
+            pass
         
         return setups
     
@@ -190,7 +267,8 @@ class MarketAnalyzer:
             stop_loss_pct = 3.5
             take_profit_pct = 15
         
-        if confidence >= 70 and direction:
+        min_conf_local = 55 if regime == 'VOLATILE' else 70
+        if confidence >= min_conf_local and direction:
             return {
                 'type': 'TREND_FOLLOWING_ENHANCED',
                 'symbol': symbol,
@@ -199,9 +277,40 @@ class MarketAnalyzer:
                 'entry_price': price,
                 'stop_loss_percent': stop_loss_pct,
                 'take_profit_percent': take_profit_pct,
-                'reasons': reasons
+                'reasons': reasons,
+                'strategy': 'TREND_FOLLOWING'  # Tag for tracking
             }
         
+        # Volatility fallback scoring to avoid zero-confidence in VOLATILE
+        try:
+            atr = indicators.get('atr', 0)
+            current_price = indicators.get('current_price', price)
+            atr_ratio = (atr / current_price) if current_price else 0
+            volume = indicators.get('volume_ratio', 1.0)
+            base_conf = 0
+            if atr_ratio > 0.008:
+                base_conf += min(40, int(atr_ratio * 4000))
+            if volume > 1.2:
+                base_conf += min(25, int((volume - 1.0) * 25))
+            if regime == 'VOLATILE':
+                base_conf += 20
+            if rsi < 35 or rsi > 65:
+                base_conf += 15
+            min_conf = 55 if regime == 'VOLATILE' else 70
+            if base_conf >= min_conf:
+                inferred_dir = 'LONG' if rsi < 50 else 'SHORT'
+                return {
+                    'type': 'TREND_FOLLOWING_VOL_FALLBACK',
+                    'symbol': symbol,
+                    'direction': inferred_dir,
+                    'confidence': min(95, base_conf),
+                    'entry_price': price,
+                    'stop_loss_percent': stop_loss_pct,
+                    'take_profit_percent': take_profit_pct,
+                    'reasons': reasons + [f"Vol fallback ATR:{atr_ratio:.2%} Vol:{volume:.1f}x RSI:{rsi:.0f}"]
+                }
+        except Exception:
+            pass
         return None
     
     def _identify_breakout_setup_enhanced(self, indicators: Dict, regime: str, symbol: str, price: float, market_data: Dict) -> Optional[Dict]:
@@ -316,7 +425,8 @@ class MarketAnalyzer:
                 confidence += 7
                 reasons.append(f"✓ Volatility expanding ({atr_percent:.1f}%)")
         
-        if confidence >= 70 and direction:
+        min_conf_local = 55 if (market_data.get('regime') == 'VOLATILE') else 70
+        if confidence >= min_conf_local and direction:
             return {
                 'type': 'BREAKOUT_ENHANCED',
                 'symbol': symbol,
@@ -325,9 +435,41 @@ class MarketAnalyzer:
                 'entry_price': price,
                 'stop_loss_percent': stop_loss_pct,
                 'take_profit_percent': take_profit_pct,
-                'reasons': reasons
+                'reasons': reasons,
+                'strategy': 'BREAKOUT'  # Tag for tracking
             }
         
+        # Volatility fallback scoring
+        try:
+            atr = indicators.get('atr', 0)
+            current_price = indicators.get('current_price', price)
+            atr_ratio = (atr / current_price) if current_price else 0
+            volume = indicators.get('volume_ratio', 1.0)
+            rsi = indicators.get('rsi', 50)
+            base_conf = 0
+            if atr_ratio > 0.008:
+                base_conf += min(40, int(atr_ratio * 4000))
+            if volume > 1.2:
+                base_conf += min(25, int((volume - 1.0) * 25))
+            if regime == 'VOLATILE':
+                base_conf += 20
+            if rsi < 35 or rsi > 65:
+                base_conf += 15
+            min_conf = 55 if regime == 'VOLATILE' else 70
+            if base_conf >= min_conf:
+                inferred_dir = 'LONG' if rsi < 50 else 'SHORT'
+                return {
+                    'type': 'BREAKOUT_VOL_FALLBACK',
+                    'symbol': symbol,
+                    'direction': inferred_dir,
+                    'confidence': min(95, base_conf),
+                    'entry_price': price,
+                    'stop_loss_percent': stop_loss_pct,
+                    'take_profit_percent': take_profit_pct,
+                    'reasons': reasons + [f"Vol fallback ATR:{atr_ratio:.2%} Vol:{volume:.1f}x RSI:{rsi:.0f}"]
+                }
+        except Exception:
+            pass
         return None
     
     def _identify_reversal_setup_enhanced(self, indicators: Dict, regime: str, symbol: str, price: float) -> Optional[Dict]:
@@ -424,7 +566,8 @@ class MarketAnalyzer:
                 confidence += 8
                 reasons.append("✓ Price well above EMA - rubber band effect")
         
-        if confidence >= 70 and direction:
+        min_conf_local = 55 if regime == 'VOLATILE' else 70
+        if confidence >= min_conf_local and direction:
             return {
                 'type': 'REVERSAL_ENHANCED',
                 'symbol': symbol,
@@ -436,6 +579,36 @@ class MarketAnalyzer:
                 'reasons': reasons
             }
         
+        # Volatility fallback scoring
+        try:
+            atr = indicators.get('atr', 0)
+            current_price = indicators.get('current_price', price)
+            atr_ratio = (atr / current_price) if current_price else 0
+            volume = indicators.get('volume_ratio', 1.0)
+            base_conf = 0
+            if atr_ratio > 0.008:
+                base_conf += min(40, int(atr_ratio * 4000))
+            if volume > 1.2:
+                base_conf += min(25, int((volume - 1.0) * 25))
+            if regime == 'VOLATILE':
+                base_conf += 20
+            if rsi < 35 or rsi > 65:
+                base_conf += 15
+            min_conf = 55 if regime == 'VOLATILE' else 70
+            if base_conf >= min_conf:
+                inferred_dir = 'LONG' if rsi < 50 else 'SHORT'
+                return {
+                    'type': 'REVERSAL_VOL_FALLBACK',
+                    'symbol': symbol,
+                    'direction': inferred_dir,
+                    'confidence': min(92, base_conf),
+                    'entry_price': price,
+                    'stop_loss_percent': stop_loss_pct,
+                    'take_profit_percent': take_profit_pct,
+                    'reasons': reasons + [f"Vol fallback ATR:{atr_ratio:.2%} Vol:{volume:.1f}x RSI:{rsi:.0f}"]
+                }
+        except Exception:
+            pass
         return None
     
     def _identify_momentum_setup_enhanced(self, indicators: Dict, regime: str, symbol: str, price: float, market_data: Dict) -> Optional[Dict]:
@@ -550,7 +723,8 @@ class MarketAnalyzer:
                 confidence -= 8
                 reasons.append("⚠ Regime not aligned")
         
-        if confidence >= 70 and direction:
+        min_conf_local = 55 if (market_data.get('regime') == 'VOLATILE') else 70
+        if confidence >= min_conf_local and direction:
             return {
                 'type': 'MOMENTUM_ENHANCED',
                 'symbol': symbol,
@@ -562,78 +736,109 @@ class MarketAnalyzer:
                 'reasons': reasons
             }
         
+        # Volatility fallback scoring
+        try:
+            atr = indicators.get('atr', 0)
+            current_price = indicators.get('current_price', price)
+            atr_ratio = (atr / current_price) if current_price else 0
+            volume = indicators.get('volume_ratio', 1.0)
+            rsi = indicators.get('rsi', 50)
+            base_conf = 0
+            if atr_ratio > 0.008:
+                base_conf += min(40, int(atr_ratio * 4000))
+            if volume > 1.2:
+                base_conf += min(25, int((volume - 1.0) * 25))
+            if market_data.get('regime') == 'VOLATILE':
+                base_conf += 20
+            if rsi < 35 or rsi > 65:
+                base_conf += 15
+            min_conf = 55 if market_data.get('regime') == 'VOLATILE' else 70
+            if base_conf >= min_conf:
+                inferred_dir = 'LONG' if rsi < 50 else 'SHORT'
+                return {
+                    'type': 'MOMENTUM_VOL_FALLBACK',
+                    'symbol': symbol,
+                    'direction': inferred_dir,
+                    'confidence': min(95, base_conf),
+                    'entry_price': price,
+                    'stop_loss_percent': stop_loss_pct,
+                    'take_profit_percent': take_profit_pct,
+                    'reasons': reasons + [f"Vol fallback ATR:{atr_ratio:.2%} Vol:{volume:.1f}x RSI:{rsi:.0f}"]
+                }
+        except Exception:
+            pass
         return None
     
     def _identify_volatility_breakout(self, indicators: Dict, regime: str, symbol: str, price: float, market_data: Dict) -> Optional[Dict]:
         """
-        NEW SETUP: Volatility contraction followed by expansion
-        - Low volatility (consolidation) followed by breakout
-        - Bollinger Band squeeze
-        - Volume expansion
+        BALANCED: Volatility trading with quality filters
+        - Core volatility scoring (ATR-based)
+        - Regime boost for VOLATILE markets
+        - Quality filters (RSI extremes, volume, trend alignment)
         """
-        confidence = 0
-        direction = None
-        reasons = []
+        # Extract indicators
+        atr = indicators.get('atr', 0)
+        atr_ratio = atr / price if price else 0
+        volume = indicators.get('volume_ratio', 1.0)
+        rsi = indicators.get('rsi', 50)
+        ema_21 = indicators.get('ema_21', price)
         stop_loss_pct = 4
         take_profit_pct = 14
         
-        atr_percent = indicators.get('atr_percent', 0)
-        bb_width = indicators.get('bb_upper', 0) - indicators.get('bb_lower', 0)
-        bb_position = indicators.get('bb_position', 50)
-        volume_ratio = indicators.get('volume_ratio', 1)
-        rsi = indicators.get('rsi', 50)
-        macd_diff = indicators.get('macd_diff', 0)
+        confidence = 0
+        reasons = []
         
-        # Detect squeeze (low volatility)
-        is_squeeze = atr_percent < 2.5  # Low volatility
+        # Core volatility (0-50 points)
+        if atr_ratio > 0.004:  # >0.4% ATR
+            atr_score = min(50, int(atr_ratio * 10000))
+            confidence += atr_score
+            reasons.append(f"✓ Volatility high (ATR {atr_ratio:.2%}) -> +{atr_score}")
         
-        if is_squeeze and volume_ratio > 1.3:
-            # Volatility expanding after squeeze - direction matters
-            
-            if bb_position > 65 and macd_diff > 0:
-                # Breaking upward
-                confidence += 40
-                direction = 'LONG'
-                reasons.append("✓ Volatility squeeze breaking upward")
-                
-                if rsi > 55 and rsi < 70:
-                    confidence += 20
-                    reasons.append(f"✓ RSI confirming bullish breakout ({rsi:.1f})")
-                
-                if volume_ratio > 1.8:
-                    confidence += 15
-                    reasons.append(f"✓ Volume surge on breakout ({volume_ratio:.2f}x)")
-                
-                confidence += 10
-                reasons.append("✓ Squeeze releases typically have strong moves")
-            
-            elif bb_position < 35 and macd_diff < 0:
-                # Breaking downward
-                confidence += 40
-                direction = 'SHORT'
-                reasons.append("✓ Volatility squeeze breaking downward")
-                
-                if rsi < 45 and rsi > 30:
-                    confidence += 20
-                    reasons.append(f"✓ RSI confirming bearish breakout ({rsi:.1f})")
-                
-                if volume_ratio > 1.8:
-                    confidence += 15
-                    reasons.append(f"✓ Volume surge on breakdown ({volume_ratio:.2f}x)")
-                
-                confidence += 10
-                reasons.append("✓ Squeeze releases typically have strong moves")
+        # Regime boost (0-20 points)
+        if regime == 'VOLATILE':
+            confidence += 20
+            reasons.append("✓ VOLATILE regime -> +20")
         
-        if confidence >= 70 and direction:
+        # Quality filters (0-30 points total)
+        # RSI extremes = mean reversion opportunity
+        if rsi < 35:
+            confidence += 15
+            reasons.append(f"✓ Oversold RSI ({rsi:.1f}) -> +15")
+        elif rsi > 65:
+            confidence += 15
+            reasons.append(f"✓ Overbought RSI ({rsi:.1f}) -> +15")
+        
+        # Volume confirmation
+        if volume > 1.3:
+            confidence += 10
+            reasons.append(f"✓ Volume confirmation ({volume:.2f}x) -> +10")
+        
+        # Trend alignment
+        if (price < ema_21 and rsi < 45) or (price > ema_21 and rsi > 55):
+            confidence += 5
+            reasons.append("✓ Trend alignment -> +5")
+        
+        # Performance-based boost: if this strategy is performing well, boost confidence
+        strategy_boost = self.perf_tracker.get_strategy_boost('VOLATILITY_BREAKOUT')
+        if strategy_boost > 0:
+            confidence += strategy_boost
+            reasons.append(f"✓ Strategy performing well -> +{strategy_boost}")
+        
+        # Lower threshold for VOLATILE to capture BTC
+        min_conf = 65 if regime == 'VOLATILE' else 75
+        
+        if confidence >= min_conf:
+            direction = 'LONG' if rsi < 50 else 'SHORT'
             return {
                 'type': 'VOLATILITY_BREAKOUT',
                 'symbol': symbol,
                 'direction': direction,
-                'confidence': min(confidence, 90),
+                'confidence': min(95, confidence),
                 'entry_price': price,
                 'stop_loss_percent': stop_loss_pct,
                 'take_profit_percent': take_profit_pct,
-                'reasons': reasons
+                'reasons': reasons,
+                'strategy': 'VOLATILITY_BREAKOUT'  # Tag for tracking
             }
         
         return None
@@ -713,7 +918,8 @@ class MarketAnalyzer:
                 confidence += 8
                 reasons.append("✓ Favorable market regime")
         
-        if confidence >= 70 and direction:
+        min_conf_local = 55 if regime == 'VOLATILE' else 70
+        if confidence >= min_conf_local and direction:
             return {
                 'type': 'EMA_CROSSOVER',
                 'symbol': symbol,
@@ -725,6 +931,37 @@ class MarketAnalyzer:
                 'reasons': reasons
             }
         
+        # Volatility fallback scoring
+        try:
+            atr = indicators.get('atr', 0)
+            current_price = indicators.get('current_price', price)
+            atr_ratio = (atr / current_price) if current_price else 0
+            volume = indicators.get('volume_ratio', 1.0)
+            rsi = indicators.get('rsi', 50)
+            base_conf = 0
+            if atr_ratio > 0.008:
+                base_conf += min(40, int(atr_ratio * 4000))
+            if volume > 1.2:
+                base_conf += min(25, int((volume - 1.0) * 25))
+            if regime == 'VOLATILE':
+                base_conf += 20
+            if rsi < 35 or rsi > 65:
+                base_conf += 15
+            min_conf = 55 if regime == 'VOLATILE' else 70
+            if base_conf >= min_conf:
+                inferred_dir = 'LONG' if rsi < 50 else 'SHORT'
+                return {
+                    'type': 'EMA_CROSSOVER_VOL_FALLBACK',
+                    'symbol': symbol,
+                    'direction': inferred_dir,
+                    'confidence': min(92, base_conf),
+                    'entry_price': price,
+                    'stop_loss_percent': stop_loss_pct,
+                    'take_profit_percent': take_profit_pct,
+                    'reasons': reasons + [f"Vol fallback ATR:{atr_ratio:.2%} Vol:{volume:.1f}x RSI:{rsi:.0f}"]
+                }
+        except Exception:
+            pass
         return None
     
     def should_exit_position(self, position: Dict, market_data: Dict, indicators: Dict) -> tuple[bool, str, int]:

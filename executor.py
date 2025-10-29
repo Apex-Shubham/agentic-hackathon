@@ -3,6 +3,7 @@ Order Execution Engine
 Handles trade execution, position management, stop-loss and take-profit orders
 """
 from typing import Dict, List, Optional
+import math
 from datetime import datetime, timezone
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -278,6 +279,18 @@ class Executor:
         order_ids = []
         
         try:
+            # Fetch symbol filters for proper rounding
+            exchange_info = self.client.futures_exchange_info()
+            symbol_info = next((s for s in exchange_info['symbols'] if s['symbol'] == symbol), None)
+            if not symbol_info:
+                raise ValueError(f"Symbol info not found for {symbol}")
+            # LOT_SIZE
+            lot_filter = next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')
+            step_size = float(lot_filter['stepSize'])
+            min_qty = float(lot_filter['minQty'])
+            # PRICE precision
+            price_precision_local = int(symbol_info.get('pricePrecision', price_precision))
+            
             # Calculate TP levels (50%, 30%, 20% of position)
             tp_quantities = [
                 quantity * SCALED_TP_LEVELS[0],
@@ -302,8 +315,15 @@ class Executor:
                 
                 if tp_price <= 0:
                     raise ValueError("Computed take-profit price <= 0")
-                tp_price = round(tp_price, price_precision)
-                tp_qty = round(tp_qty, 3)
+                # Round price to precision
+                tp_price = round(tp_price, price_precision_local)
+                # Round quantity down to nearest step size increment
+                if step_size <= 0:
+                    raise ValueError("Invalid step size from LOT_SIZE filter")
+                tp_qty = math.floor(tp_qty / step_size) * step_size
+                # Skip if below minimum quantity
+                if tp_qty < min_qty or tp_qty <= 0:
+                    continue
                 
                 # Place take profit order
                 order = self.client.futures_create_order(
@@ -316,7 +336,7 @@ class Executor:
                 )
                 
                 order_ids.append(str(order['orderId']))
-                print(f"   🎯 Take Profit {i+1} set @ ${tp_price:,.2f} ({tp_pct:.1f}%)")
+                print(f"   🎯 Take Profit {i+1} set @ ${tp_price:,.2f} ({tp_pct:.1f}%) | qty={tp_qty}")
             
             self.take_profit_orders[symbol] = order_ids
             

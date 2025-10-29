@@ -12,7 +12,8 @@ from binance.exceptions import BinanceAPIException
 import ta
 from config import (
     BINANCE_API_KEY, BINANCE_API_SECRET, TIMEFRAMES,
-    KLINE_LIMIT, MAX_API_RETRIES, RETRY_BACKOFF_MULTIPLIER
+    KLINE_LIMIT, MAX_API_RETRIES, RETRY_BACKOFF_MULTIPLIER,
+    ENABLE_VOLATILITY_TRADING, VOLATILITY_MIN_ATR_RATIO, SCALP_MODE_THRESHOLD
 )
 
 
@@ -63,6 +64,18 @@ class DataPipeline:
             # Get funding rate
             funding_rate = self.get_funding_rate(symbol)
             
+            # Compute volatility flags
+            high_24h = float(stats_24h['highPrice'])
+            low_24h = float(stats_24h['lowPrice'])
+            range_ratio = (high_24h - low_24h) / current_price if current_price else 0
+            atr_ratio = (indicators.get('atr', 0) / current_price) if current_price else 0
+            is_high_volatility = False
+            if ENABLE_VOLATILITY_TRADING:
+                if atr_ratio >= VOLATILITY_MIN_ATR_RATIO and range_ratio >= SCALP_MODE_THRESHOLD:
+                    is_high_volatility = True
+                    if regime == 'RANGING':
+                        regime = 'VOLATILE'
+
             # Compile all data
             market_data = {
                 'symbol': symbol,
@@ -70,10 +83,11 @@ class DataPipeline:
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'volume_24h': float(stats_24h['volume']),
                 'price_change_24h': float(stats_24h['priceChangePercent']),
-                'high_24h': float(stats_24h['highPrice']),
-                'low_24h': float(stats_24h['lowPrice']),
+                'high_24h': high_24h,
+                'low_24h': low_24h,
                 'funding_rate': funding_rate,
                 'regime': regime,
+                'is_high_volatility': is_high_volatility,
                 'indicators': indicators,
                 'timeframe_data': {tf: self._extract_recent_data(df) for tf, df in timeframe_data.items()}
             }
@@ -246,8 +260,15 @@ class DataPipeline:
                 elif bb_position < 20:
                     return "BREAKOUT_DOWN"
             
-            # Volatile/choppy market
-            if atr_percent > 4.0:
+            # Volatile/choppy market using config thresholds
+            # If ATR/price and 24h range are high, consider VOLATILE
+            try:
+                high_24h = df['high'].tail(24).max()
+                low_24h = df['low'].tail(24).min()
+                range_ratio = (high_24h - low_24h) / current_price if current_price else 0
+            except Exception:
+                range_ratio = 0
+            if (atr_percent/100) >= VOLATILITY_MIN_ATR_RATIO or range_ratio >= SCALP_MODE_THRESHOLD:
                 return "VOLATILE"
             
             # Ranging market (price bouncing between levels)

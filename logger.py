@@ -10,7 +10,8 @@ import pandas as pd
 import numpy as np
 from config import (
     LOG_DIR, DECISION_LOG_FILE, TRADE_LOG_FILE,
-    PERFORMANCE_LOG_FILE, ERROR_LOG_FILE, INITIAL_CAPITAL
+    PERFORMANCE_LOG_FILE, ERROR_LOG_FILE, INITIAL_CAPITAL,
+    ASSESSMENT_LOG_FILE
 )
 
 
@@ -42,6 +43,7 @@ class Logger:
             'urgency': decision.get('urgency'),
             'market_price': market_data.get('price'),
             'market_regime': market_data.get('regime'),
+            'strategy': decision.get('strategy') or execution_result.get('strategy') or 'unknown',  # Extract strategy
             'execution_result': execution_result
         }
         
@@ -51,8 +53,8 @@ class Logger:
         with open(DECISION_LOG_FILE, 'a') as f:
             f.write(json.dumps(log_entry) + '\n')
     
-    def log_trade(self, trade_details: Dict):
-        """Log a trade execution"""
+    def log_trade(self, trade_details: Dict, strategy: str = None, regime: str = None, confidence: float = None):
+        """Log a trade execution with optional strategy/regime for performance tracking"""
         log_entry = {
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'symbol': trade_details.get('symbol'),
@@ -66,7 +68,10 @@ class Logger:
             'stop_loss_price': trade_details.get('stop_loss_price'),
             'take_profit_price': trade_details.get('take_profit_price'),
             'order_id': trade_details.get('order_id'),
-            'status': trade_details.get('status')
+            'status': trade_details.get('status'),
+            'strategy': strategy or trade_details.get('strategy') or 'unknown',
+            'regime': regime or trade_details.get('regime') or 'UNKNOWN',
+            'confidence': confidence or trade_details.get('confidence')
         }
         
         self.trades.append(log_entry)
@@ -110,6 +115,16 @@ class Logger:
         print(f"❌ ERROR [{log_entry['timestamp']}]: {error}")
         if context:
             print(f"   Context: {context}")
+
+    def log_assessment(self, assessment: Dict):
+        """Log detailed market assessment/thoughts for an asset and cycle."""
+        log_entry = {
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            **assessment,
+        }
+        # Append to file
+        with open(ASSESSMENT_LOG_FILE, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
     
     def calculate_metrics(self) -> Dict:
         """Calculate performance metrics"""
@@ -313,10 +328,14 @@ class Logger:
 # Global logger instance
 _logger_instance = None
 
-def get_logger() -> Logger:
-    """Get or create global logger instance"""
+def get_logger(initial_capital=None) -> Logger:
+    """Get or create global logger instance. initial_capital used on first create only."""
     global _logger_instance
     if _logger_instance is None:
-        _logger_instance = Logger()
+        if initial_capital is not None:
+            _logger_instance = Logger()
+            _logger_instance.initial_capital = initial_capital
+        else:
+            _logger_instance = Logger()
     return _logger_instance
 
