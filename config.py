@@ -40,7 +40,7 @@ MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', 5))
 # Portfolio limits
 MAX_POSITIONS_PER_SYMBOL = int(os.getenv('MAX_POSITIONS_PER_SYMBOL', 2))  # Allow pyramiding (max 2 per symbol)
 MAX_CORRELATED_POSITIONS = int(os.getenv('MAX_CORRELATED_POSITIONS', 3))  # Max 3 crypto positions (BTC/ETH/SOL correlate)
-MAX_PORTFOLIO_RISK = float(os.getenv('MAX_PORTFOLIO_RISK', 0.15))  # Total risk capped at 15%
+MAX_PORTFOLIO_RISK = float(os.getenv('MAX_PORTFOLIO_RISK', 0.50))  # Total risk capped at 50% (allows $1200 positions + multiple trades)
 
 # Position sizing - Fixed dollar amounts based on confidence
 HIGH_CONFIDENCE_POSITION_SIZE = float(os.getenv('HIGH_CONFIDENCE_POSITION_SIZE', 1200.0))  # $1200 for 75%+ confidence
@@ -107,6 +107,9 @@ TRADE_LOG_FILE = f'{LOG_DIR}/trades.jsonl'
 PERFORMANCE_LOG_FILE = f'{LOG_DIR}/performance.jsonl'
 ERROR_LOG_FILE = f'{LOG_DIR}/errors.jsonl'
 ASSESSMENT_LOG_FILE = f'{LOG_DIR}/assessments.jsonl'
+
+# Telegram Bot Settings (disabled)
+ENABLE_TELEGRAM_BOT = False
 
 # Health Monitor Settings
 HEALTH_CHECK_INTERVAL = 60

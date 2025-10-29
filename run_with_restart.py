@@ -30,16 +30,21 @@ def run_with_auto_restart():
             print(f"⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
             print()
             
-            # Run the main bot
-            result = subprocess.run(
-                [sys.executable, "main.py"],
-                check=True
-            )
-            
-            # If we get here, bot completed normally (14 days finished)
-            print("\n✅ Bot completed successfully!")
-            print("🏁 Competition period finished")
-            break
+            # Run the main bot (do not raise on non-zero exit)
+            result = subprocess.run([sys.executable, "main.py"], check=False)
+
+            # Handle exit codes explicitly
+            if result.returncode == 0:
+                # Completed normally (e.g., competition finished)
+                print("\n✅ Bot completed successfully!")
+                print("🏁 Competition period finished")
+                break
+            elif result.returncode in (130, -2):  # 130 = SIGINT (Ctrl+C)
+                print("\n🛑 Received Ctrl+C (SIGINT) - stopping without restart")
+                sys.exit(0)
+            else:
+                # Treat other non-zero as crash and restart
+                raise subprocess.CalledProcessError(result.returncode, result.args)
             
         except subprocess.CalledProcessError as e:
             restart_count += 1

@@ -54,6 +54,8 @@ class TradingBot:
         self.logger = get_logger(initial_capital=self.initial_capital)
         self.health_monitor = get_health_monitor()
         
+        # Telegram bot integration removed
+        
         # Competition tracking
         self.start_time = datetime.now(timezone.utc)
         self.competition_start = datetime.fromisoformat(COMPETITION_START_DATE.replace('Z', '+00:00'))
