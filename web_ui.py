@@ -250,5 +250,5 @@ if __name__ == '__main__':
     print("📍 Dashboard: http://localhost:5000")
     print("=" * 70)
     
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=5001, debug=False)
 

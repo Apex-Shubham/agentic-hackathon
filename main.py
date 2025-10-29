@@ -343,8 +343,8 @@ class TradingBot:
             print(f"   ❌ REJECTED: Max total positions ({MAX_OPEN_POSITIONS}) reached")
         elif decision['confidence'] < min_conf:
             print(f"   ❌ REJECTED: Confidence too low")
-        elif position_size_dollars > available_balance * 0.2:
-            print(f"   ❌ REJECTED: Position too large (>20% of available balance)")
+        elif position_size_dollars > available_balance * 0.95:
+            print(f"   ❌ REJECTED: Position too large (>95% of available balance)")
         else:
             print(f"   ✅ Passing validation checks")
         
@@ -413,7 +413,7 @@ class TradingBot:
             else:
                 print(f"   ❌ Trade execution failed: {result.get('message')}")
         
-        elif decision['action'] == 'CLOSE' and existing_position:
+        elif decision['action'] == 'CLOSE' and existing_positions:
             print(f"\n📉 CLOSING position on {asset}")
             print(f"   Reason: {decision['entry_reason']}")
             

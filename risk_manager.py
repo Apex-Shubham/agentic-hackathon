@@ -81,26 +81,38 @@ class RiskManager:
     ) -> Dict:
         """
         Calculate optimal position size based on confidence
-        Returns: dict with 'size', 'leverage', and 'size_percent'
+        Returns: dict with 'size' (dollar amount), 'leverage', and 'size_percent'
         """
-        from config import HIGH_CONFIDENCE_SIZE, MEDIUM_CONFIDENCE_SIZE, LOW_CONFIDENCE_SIZE
-        from config import HIGH_CONFIDENCE_LEVERAGE, BASE_LEVERAGE
+        from config import (
+            HIGH_CONFIDENCE_LEVERAGE, 
+            BASE_LEVERAGE,
+            HIGH_CONFIDENCE_POSITION_SIZE, 
+            MEDIUM_CONFIDENCE_POSITION_SIZE, 
+            LOW_CONFIDENCE_POSITION_SIZE
+        )
         
-        # Confidence-based sizing
-        if confidence >= 85:
-            size_percent = HIGH_CONFIDENCE_SIZE
+        # Fixed dollar amounts based on confidence
+        if confidence >= 75:
+            position_size_dollars = HIGH_CONFIDENCE_POSITION_SIZE  # $1200 for 75%+ confidence
             leverage = HIGH_CONFIDENCE_LEVERAGE
-        elif confidence >= 75:
-            size_percent = MEDIUM_CONFIDENCE_SIZE
+        elif confidence >= 70:
+            position_size_dollars = MEDIUM_CONFIDENCE_POSITION_SIZE  # $1000 for 70-74% confidence
             leverage = BASE_LEVERAGE
         else:
-            size_percent = LOW_CONFIDENCE_SIZE
+            # Below 70% - use smaller fixed amount
+            position_size_dollars = LOW_CONFIDENCE_POSITION_SIZE  # $800 for <70% confidence
             leverage = BASE_LEVERAGE
         
-        position_size = balance * size_percent
+        # Calculate percentage for reporting/validation purposes
+        size_percent = position_size_dollars / balance if balance > 0 else 0
+        
+        # Cap position size to available balance
+        if position_size_dollars > balance:
+            position_size_dollars = balance * 0.95  # Use 95% of balance max
+            size_percent = 0.95
         
         return {
-            'size': position_size,
+            'size': position_size_dollars,
             'leverage': leverage,
             'size_percent': size_percent * 100
         }

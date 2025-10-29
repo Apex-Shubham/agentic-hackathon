@@ -34,7 +34,7 @@ INITIAL_TRADE_LEVERAGE = int(os.getenv('INITIAL_TRADE_LEVERAGE', 2))
 # Risk Limits - FIXED: Adjusted thresholds to match competition rules
 MAX_DRAWDOWN = 0.40  # 40% = disqualification (6000/10000)
 MAX_LEVERAGE = int(os.getenv('MAX_LEVERAGE', 5))
-MAX_POSITION_SIZE = float(os.getenv('MAX_POSITION_SIZE', 0.10))
+MAX_POSITION_SIZE = float(os.getenv('MAX_POSITION_SIZE', 0.30))  # 30% max to allow $1200 positions on $5000 portfolio
 MAX_OPEN_POSITIONS = int(os.getenv('MAX_OPEN_POSITIONS', 5))
 
 # Portfolio limits
@@ -42,11 +42,16 @@ MAX_POSITIONS_PER_SYMBOL = int(os.getenv('MAX_POSITIONS_PER_SYMBOL', 2))  # Allo
 MAX_CORRELATED_POSITIONS = int(os.getenv('MAX_CORRELATED_POSITIONS', 3))  # Max 3 crypto positions (BTC/ETH/SOL correlate)
 MAX_PORTFOLIO_RISK = float(os.getenv('MAX_PORTFOLIO_RISK', 0.15))  # Total risk capped at 15%
 
-# Position sizing (12% base = $600 on $5000)
+# Position sizing - Fixed dollar amounts based on confidence
+HIGH_CONFIDENCE_POSITION_SIZE = float(os.getenv('HIGH_CONFIDENCE_POSITION_SIZE', 1200.0))  # $1200 for 75%+ confidence
+MEDIUM_CONFIDENCE_POSITION_SIZE = float(os.getenv('MEDIUM_CONFIDENCE_POSITION_SIZE', 1000.0))  # $1000 for 70-74% confidence
+LOW_CONFIDENCE_POSITION_SIZE = float(os.getenv('LOW_CONFIDENCE_POSITION_SIZE', 800.0))  # $800 for <70% confidence
+
+# Legacy percentage-based configs (kept for backwards compatibility, not used anymore)
 POSITION_SIZE_PERCENT = float(os.getenv('POSITION_SIZE_PERCENT', 0.12))
-HIGH_CONFIDENCE_SIZE = float(os.getenv('HIGH_CONFIDENCE_SIZE', 0.15))    # $750 for 85%+ confidence
-MEDIUM_CONFIDENCE_SIZE = float(os.getenv('MEDIUM_CONFIDENCE_SIZE', 0.12))  # $600 for 75-84% confidence
-LOW_CONFIDENCE_SIZE = float(os.getenv('LOW_CONFIDENCE_SIZE', 0.08))     # $400 for 70-74% confidence
+HIGH_CONFIDENCE_SIZE = float(os.getenv('HIGH_CONFIDENCE_SIZE', 0.15))
+MEDIUM_CONFIDENCE_SIZE = float(os.getenv('MEDIUM_CONFIDENCE_SIZE', 0.12))
+LOW_CONFIDENCE_SIZE = float(os.getenv('LOW_CONFIDENCE_SIZE', 0.08))
 
 # Leverage by confidence
 HIGH_CONFIDENCE_LEVERAGE = int(os.getenv('HIGH_CONFIDENCE_LEVERAGE', 3))
