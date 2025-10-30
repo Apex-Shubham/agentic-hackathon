@@ -1,2 +1,2 @@
-worker: python run_with_restart.py
+worker: python main.py
 

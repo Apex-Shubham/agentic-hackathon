@@ -7,9 +7,9 @@ Type=simple
 User=YOUR_USERNAME
 WorkingDirectory=/path/to/trading-bot
 Environment=PATH=/path/to/trading-bot/venv/bin
-ExecStart=/path/to/trading-bot/venv/bin/python3 /path/to/trading-bot/run_with_restart.py
-Restart=always
-RestartSec=10
+ExecStart=/path/to/trading-bot/venv/bin/python3 /path/to/trading-bot/main.py
+# No auto-restart to allow manual control; change to 'on-failure' if desired
+Restart=no
 StandardOutput=append:/path/to/trading-bot/logs/bot_service.log
 StandardError=append:/path/to/trading-bot/logs/bot_service_error.log
 

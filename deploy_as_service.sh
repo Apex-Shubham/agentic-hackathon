@@ -54,9 +54,9 @@ Type=simple
 User=$REAL_USER
 WorkingDirectory=$BOT_DIR
 Environment=PATH=$BOT_DIR/venv/bin
-ExecStart=$PYTHON_PATH $BOT_DIR/run_with_restart.py
-Restart=always
-RestartSec=10
+ExecStart=$PYTHON_PATH $BOT_DIR/main.py
+# No auto-restart to allow manual control; change to 'on-failure' if desired
+Restart=no
 StandardOutput=append:$BOT_DIR/logs/bot_service.log
 StandardError=append:$BOT_DIR/logs/bot_service_error.log
 

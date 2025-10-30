@@ -137,12 +137,9 @@ class TradingBot:
             except Exception as e:
                 print(f"\n❌ Error in main loop: {e}")
                 self.health_monitor.handle_error(e, {'location': 'main_loop'})
-                
-                # Check if we need to restart
-                if self.health_monitor.auto_restart_on_crash():
-                    print("🔄 Attempting to continue after error...")
-                
-                time.sleep(30)  # Wait before retrying
+                # No auto-restart or auto-continue on unexpected errors
+                self.shutdown()
+                break
     
     def _trading_cycle(self):
         """Execute one complete trading cycle"""

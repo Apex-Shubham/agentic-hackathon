@@ -24,6 +24,6 @@ RUN mkdir -p logs
 # Set environment to production
 ENV PYTHONUNBUFFERED=1
 
-# Run the bot with auto-restart wrapper
-CMD ["python", "run_with_restart.py"]
+# Run the bot directly (no auto-restart)
+CMD ["python", "main.py"]
 
