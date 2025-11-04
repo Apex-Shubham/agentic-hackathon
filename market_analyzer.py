@@ -267,6 +267,21 @@ class MarketAnalyzer:
             stop_loss_pct = 3.5
             take_profit_pct = 15
         
+        # Check strategy cooldown
+        is_cooldown, cooldown_reason = self.perf_tracker.check_strategy_cooldown('TREND_FOLLOWING')
+        if is_cooldown:
+            return None
+        
+        # Apply adaptive strategy boost
+        boost_data = self.perf_tracker.calculate_strategy_boost('TREND_FOLLOWING')
+        boost = boost_data['boost']
+        if boost != 0:
+            confidence += boost
+            if boost > 0:
+                reasons.append(f"✓ Strategy boost +{boost} ({boost_data['reason']})")
+            else:
+                reasons.append(f"⚠ Strategy penalty {boost} ({boost_data['reason']})")
+        
         min_conf_local = 55 if regime == 'VOLATILE' else 70
         if confidence >= min_conf_local and direction:
             return {
@@ -425,6 +440,21 @@ class MarketAnalyzer:
                 confidence += 7
                 reasons.append(f"✓ Volatility expanding ({atr_percent:.1f}%)")
         
+        # Check strategy cooldown
+        is_cooldown, cooldown_reason = self.perf_tracker.check_strategy_cooldown('BREAKOUT')
+        if is_cooldown:
+            return None
+        
+        # Apply adaptive strategy boost
+        boost_data = self.perf_tracker.calculate_strategy_boost('BREAKOUT')
+        boost = boost_data['boost']
+        if boost != 0:
+            confidence += boost
+            if boost > 0:
+                reasons.append(f"✓ Strategy boost +{boost} ({boost_data['reason']})")
+            else:
+                reasons.append(f"⚠ Strategy penalty {boost} ({boost_data['reason']})")
+        
         min_conf_local = 55 if (market_data.get('regime') == 'VOLATILE') else 70
         if confidence >= min_conf_local and direction:
             return {
@@ -566,6 +596,21 @@ class MarketAnalyzer:
                 confidence += 8
                 reasons.append("✓ Price well above EMA - rubber band effect")
         
+        # Check strategy cooldown
+        is_cooldown, cooldown_reason = self.perf_tracker.check_strategy_cooldown('REVERSAL')
+        if is_cooldown:
+            return None
+        
+        # Apply adaptive strategy boost
+        boost_data = self.perf_tracker.calculate_strategy_boost('REVERSAL')
+        boost = boost_data['boost']
+        if boost != 0:
+            confidence += boost
+            if boost > 0:
+                reasons.append(f"✓ Strategy boost +{boost} ({boost_data['reason']})")
+            else:
+                reasons.append(f"⚠ Strategy penalty {boost} ({boost_data['reason']})")
+        
         min_conf_local = 55 if regime == 'VOLATILE' else 70
         if confidence >= min_conf_local and direction:
             return {
@@ -576,7 +621,8 @@ class MarketAnalyzer:
                 'entry_price': price,
                 'stop_loss_percent': stop_loss_pct,
                 'take_profit_percent': take_profit_pct,
-                'reasons': reasons
+                'reasons': reasons,
+                'strategy': 'REVERSAL'  # Tag for tracking
             }
         
         # Volatility fallback scoring
@@ -677,6 +723,21 @@ class MarketAnalyzer:
                 confidence -= 8
                 reasons.append("⚠ Regime not aligned")
         
+        # Check strategy cooldown
+        is_cooldown, cooldown_reason = self.perf_tracker.check_strategy_cooldown('MOMENTUM')
+        if is_cooldown:
+            return None
+        
+        # Apply adaptive strategy boost
+        boost_data = self.perf_tracker.calculate_strategy_boost('MOMENTUM')
+        boost = boost_data['boost']
+        if boost != 0:
+            confidence += boost
+            if boost > 0:
+                reasons.append(f"✓ Strategy boost +{boost} ({boost_data['reason']})")
+            else:
+                reasons.append(f"⚠ Strategy penalty {boost} ({boost_data['reason']})")
+        
         # === BEARISH MOMENTUM ===
         elif price_change_4h < -3 and price_change_24h < -5:
             confidence += 30
@@ -733,7 +794,8 @@ class MarketAnalyzer:
                 'entry_price': price,
                 'stop_loss_percent': stop_loss_pct,
                 'take_profit_percent': take_profit_pct,
-                'reasons': reasons
+                'reasons': reasons,
+                'strategy': 'MOMENTUM'  # Tag for tracking
             }
         
         # Volatility fallback scoring
@@ -818,11 +880,20 @@ class MarketAnalyzer:
             confidence += 5
             reasons.append("✓ Trend alignment -> +5")
         
-        # Performance-based boost: if this strategy is performing well, boost confidence
-        strategy_boost = self.perf_tracker.get_strategy_boost('VOLATILITY_BREAKOUT')
-        if strategy_boost > 0:
-            confidence += strategy_boost
-            reasons.append(f"✓ Strategy performing well -> +{strategy_boost}")
+        # Check strategy cooldown
+        is_cooldown, cooldown_reason = self.perf_tracker.check_strategy_cooldown('VOLATILITY_BREAKOUT')
+        if is_cooldown:
+            return None
+        
+        # Apply adaptive strategy boost
+        boost_data = self.perf_tracker.calculate_strategy_boost('VOLATILITY_BREAKOUT')
+        boost = boost_data['boost']
+        if boost != 0:
+            confidence += boost
+            if boost > 0:
+                reasons.append(f"✓ Strategy boost +{boost} ({boost_data['reason']})")
+            else:
+                reasons.append(f"⚠ Strategy penalty {boost} ({boost_data['reason']})")
         
         # Lower threshold for VOLATILE to capture BTC
         min_conf = 65 if regime == 'VOLATILE' else 75
@@ -918,6 +989,21 @@ class MarketAnalyzer:
                 confidence += 8
                 reasons.append("✓ Favorable market regime")
         
+        # Check strategy cooldown
+        is_cooldown, cooldown_reason = self.perf_tracker.check_strategy_cooldown('EMA_CROSSOVER')
+        if is_cooldown:
+            return None
+        
+        # Apply adaptive strategy boost
+        boost_data = self.perf_tracker.calculate_strategy_boost('EMA_CROSSOVER')
+        boost = boost_data['boost']
+        if boost != 0:
+            confidence += boost
+            if boost > 0:
+                reasons.append(f"✓ Strategy boost +{boost} ({boost_data['reason']})")
+            else:
+                reasons.append(f"⚠ Strategy penalty {boost} ({boost_data['reason']})")
+        
         min_conf_local = 55 if regime == 'VOLATILE' else 70
         if confidence >= min_conf_local and direction:
             return {
@@ -928,7 +1014,8 @@ class MarketAnalyzer:
                 'entry_price': price,
                 'stop_loss_percent': stop_loss_pct,
                 'take_profit_percent': take_profit_pct,
-                'reasons': reasons
+                'reasons': reasons,
+                'strategy': 'EMA_CROSSOVER'  # Tag for tracking
             }
         
         # Volatility fallback scoring
@@ -964,10 +1051,10 @@ class MarketAnalyzer:
             pass
         return None
     
-    def should_exit_position(self, position: Dict, market_data: Dict, indicators: Dict) -> tuple[bool, str, int]:
+    def should_exit_position(self, position: Dict, market_data: Dict, indicators: Dict) -> Dict:
         """
-        ENHANCED EXIT LOGIC: Determine if position should be closed
-        Returns: (should_exit, reason, confidence)
+        GRADUATED EXIT LOGIC: Determine tiered exit recommendations
+        Returns: dict with exit_confidence, exit_action, tighten_stop, new_stop_distance_pct, reasons
         """
         symbol = position.get('symbol')
         side = position.get('side')  # 'LONG' or 'SHORT'
@@ -986,7 +1073,6 @@ class MarketAnalyzer:
         
         # === PROFIT PROTECTION ===
         if pnl_percent > 10:
-            # Take partial profits on large gains
             if side == 'LONG' and (rsi > 75 or bb_position > 90):
                 exit_confidence += 40
                 reasons.append(f"✓ Large profit ({pnl_percent:+.1f}%) + overbought - secure gains")
@@ -996,7 +1082,6 @@ class MarketAnalyzer:
         
         # === TREND REVERSAL DETECTION ===
         if side == 'LONG':
-            # Exit long positions if bearish signals emerge
             if macd_diff < -0.05 and rsi < 45:
                 exit_confidence += 35
                 reasons.append("⚠ Bearish MACD crossover + weak RSI - trend reversing")
@@ -1010,7 +1095,6 @@ class MarketAnalyzer:
                 reasons.append("⚠ Breaking lower BB with volume - exit long")
         
         elif side == 'SHORT':
-            # Exit short positions if bullish signals emerge
             if macd_diff > 0.05 and rsi > 55:
                 exit_confidence += 35
                 reasons.append("⚠ Bullish MACD crossover + strong RSI - trend reversing")
@@ -1036,11 +1120,30 @@ class MarketAnalyzer:
             exit_confidence += 20
             reasons.append(f"⚠ Loss exceeding -3% ({pnl_percent:.1f}%) - cut losses")
         
-        # Decide to exit
-        should_exit = exit_confidence >= 75
-        reason_str = " | ".join(reasons) if reasons else "No exit signals"
+        # Determine tiered exit action
+        exit_action = 'NONE'
+        tighten_stop = False
+        new_stop_distance_pct = 0.0
         
-        return should_exit, reason_str, exit_confidence
+        if exit_confidence >= 90:
+            exit_action = 'FULL'
+            tighten_stop = False
+        elif exit_confidence >= 80:
+            exit_action = 'PARTIAL_60'
+            tighten_stop = True
+            new_stop_distance_pct = 0.0  # Move to breakeven
+        elif exit_confidence >= 75:
+            exit_action = 'PARTIAL_40'
+            tighten_stop = True
+            new_stop_distance_pct = 1.0  # Tighten to 1%
+        
+        return {
+            'exit_confidence': exit_confidence,
+            'exit_action': exit_action,
+            'tighten_stop': tighten_stop,
+            'new_stop_distance_pct': new_stop_distance_pct,
+            'reasons': reasons
+        }
     
     def calculate_confidence_score(self, setup: Dict) -> float:
         """Calculate overall confidence score for a trade setup"""
@@ -1131,9 +1234,14 @@ PORTFOLIO STATUS:
         
         if existing_position:
             # Check if position should be exited
-            should_exit, exit_reason, exit_conf = self.should_exit_position(
+            exit_signal = self.should_exit_position(
                 existing_position, market_data, indicators
             )
+            
+            should_exit = exit_signal.get('exit_action') != 'NONE'
+            exit_reason = ' | '.join(exit_signal.get('reasons', []))
+            exit_conf = exit_signal.get('exit_confidence', 0)
+            exit_action = exit_signal.get('exit_action', 'NONE')
             
             context += f"""
 📊 EXISTING POSITION IN {symbol}:
@@ -1142,7 +1250,7 @@ PORTFOLIO STATUS:
    Current PnL: {existing_position.get('pnl_percent', 0):+.2f}%
    Leverage: {existing_position.get('leverage')}x
    
-   Exit Analysis: {'🔴 SUGGEST CLOSE' if should_exit else '🟢 HOLD'}
+   Exit Analysis: {'🔴 SUGGEST ' + exit_action if should_exit else '🟢 HOLD'}
    Exit Confidence: {exit_conf}%
    Reason: {exit_reason}
 """

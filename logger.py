@@ -15,10 +15,10 @@ from config import (
 )
 
 
-class Logger:
+class BotLogger:
     """Centralized logging system for the trading bot"""
     
-    def __init__(self):
+    def __init__(self, log_dir=LOG_DIR, initial_capital=None):
         self.start_time = datetime.now(timezone.utc)
         self.initial_capital = INITIAL_CAPITAL
         self.trades = []
@@ -26,7 +26,8 @@ class Logger:
         self.performance_snapshots = []
         
         # Ensure log directory exists
-        os.makedirs(LOG_DIR, exist_ok=True)
+        os.makedirs(log_dir, exist_ok=True)
+        self.log_dir = log_dir
     
     def log_decision(self, decision: Dict, market_data: Dict, execution_result: Dict = None):
         """Log a trading decision"""
@@ -306,7 +307,7 @@ class Logger:
         print(report)
         
         # Save to file
-        with open(f'{LOG_DIR}/final_report.txt', 'w') as f:
+        with open(f'{self.log_dir}/final_report.txt', 'w') as f:
             f.write(report)
         
         return report
@@ -324,18 +325,27 @@ class Logger:
         timestamp = datetime.now(timezone.utc).isoformat()
         print(f"ℹ️  [{timestamp}] {message}")
 
+    def close(self):
+        pass
+
+    def get_realized_pnl(self):
+        """Sum realized PnL across all closed trades (where 'pnl' is present)."""
+        if not self.trades:
+            return 0.0
+        return sum([t['pnl'] for t in self.trades if t.get('pnl') is not None])
+
 
 # Global logger instance
 _logger_instance = None
 
-def get_logger(initial_capital=None) -> Logger:
+def get_logger(initial_capital=None) -> BotLogger:
     """Get or create global logger instance. initial_capital used on first create only."""
     global _logger_instance
     if _logger_instance is None:
         if initial_capital is not None:
-            _logger_instance = Logger()
+            _logger_instance = BotLogger()
             _logger_instance.initial_capital = initial_capital
         else:
-            _logger_instance = Logger()
+            _logger_instance = BotLogger()
     return _logger_instance
 

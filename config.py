@@ -91,7 +91,9 @@ CIRCUIT_BREAKERS = {
 
 # Position Management
 TRAILING_STOP_ACTIVATION = 0.05
-SCALED_TP_LEVELS = [0.5, 0.3, 0.2]
+# Reduced to single TP order to minimize total orders (was [0.5, 0.3, 0.2] = 3 orders)
+# Each position now creates: 1 entry + 1 stop-loss + 1 take-profit = 3 orders total
+SCALED_TP_LEVELS = [1.0]  # Single take-profit order at full target
 
 # OpenRouter Settings
 OPENROUTER_API_URL = os.getenv('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')

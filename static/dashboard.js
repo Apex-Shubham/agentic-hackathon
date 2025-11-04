@@ -77,7 +77,8 @@ async function loadAllData() {
         loadTrades(),
         loadDecisions(),
         loadPerformance(),
-        loadHealth()
+        loadHealth(),
+        loadRealizedPnL()
     ]);
 }
 
@@ -323,6 +324,24 @@ async function loadHealth() {
         }
     } catch (error) {
         console.error('Error loading health:', error);
+    }
+}
+
+// Load realized PnL
+async function loadRealizedPnL() {
+    try {
+        const response = await fetch('/api/realized_pnl');
+        const result = await response.json();
+        if (result.status === 'success' && result.data) {
+            const value = result.data.realized_pnl;
+            const el = document.getElementById('realizedPnL');
+            if (el) {
+                el.textContent = formatCurrency(value);
+                el.className = 'metric-value' + (value >= 0 ? ' positive' : ' negative');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading realized PnL:', error);
     }
 }
 

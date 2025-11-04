@@ -6,6 +6,7 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, jsonify, request
+from flask_cors import CORS
 from typing import Dict, List
 
 from executor import get_executor
@@ -15,6 +16,7 @@ from analytics.performance_tracker import get_performance_tracker
 from config import INITIAL_CAPITAL, DECISION_LOG_FILE, TRADE_LOG_FILE, PERFORMANCE_LOG_FILE, ERROR_LOG_FILE
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000"]}})
 
 
 def read_jsonl_file(filepath: str, limit: int = 100) -> List[Dict]:
@@ -233,6 +235,22 @@ def api_health():
                 'apis_ok': health.get('apis_ok', False),
                 'agent_stats': agent_stats,
                 'time_since_cycle': health.get('time_since_cycle', 0)
+            }
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/realized_pnl')
+def api_realized_pnl():
+    """Get total realized PnL from all closed trades"""
+    try:
+        logger = get_logger()
+        realized_pnl = logger.get_realized_pnl()
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'realized_pnl': realized_pnl
             }
         })
     except Exception as e:

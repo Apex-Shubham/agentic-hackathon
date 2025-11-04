@@ -13,6 +13,16 @@ from config import (
     HIGH_CONFIDENCE_SIZE, MEDIUM_CONFIDENCE_SIZE, LOW_CONFIDENCE_SIZE
 )
 
+# Strategy-specific leverage mapping
+STRATEGY_LEVERAGE = {
+    'TREND_FOLLOWING': 4,
+    'MOMENTUM': 4,
+    'BREAKOUT': 3,
+    'EMA_CROSSOVER': 3,
+    'REVERSAL': 2,
+    'VOLATILITY_BREAKOUT': 2
+}
+
 
 class RiskManager:
     """Manages all risk parameters and enforces trading limits"""
@@ -77,31 +87,52 @@ class RiskManager:
         self, 
         balance: float,
         confidence: float, 
-        market_data: Dict = None
+        market_data: Dict = None,
+        strategy_type: str = None,
+        size_multiplier: float = 1.0
     ) -> Dict:
         """
-        Calculate optimal position size based on confidence
+        Calculate optimal position size based on confidence and strategy type
+        Parameters:
+            balance: Available balance
+            confidence: Trade confidence (0-100)
+            market_data: Market data dict with 'regime' key
+            strategy_type: Strategy type (TREND_FOLLOWING, MOMENTUM, BREAKOUT, etc.)
         Returns: dict with 'size' (dollar amount), 'leverage', and 'size_percent'
         """
         from config import (
-            HIGH_CONFIDENCE_LEVERAGE, 
-            BASE_LEVERAGE,
             HIGH_CONFIDENCE_POSITION_SIZE, 
             MEDIUM_CONFIDENCE_POSITION_SIZE, 
-            LOW_CONFIDENCE_POSITION_SIZE
+            LOW_CONFIDENCE_POSITION_SIZE,
+            MAX_LEVERAGE,
+            CIRCUIT_BREAKERS
         )
+        
+        # Get regime from market_data
+        regime = market_data.get('regime', 'UNKNOWN') if market_data else 'UNKNOWN'
+        
+        # Calculate strategy-specific leverage
+        leverage = self.get_strategy_leverage(strategy_type, confidence, regime)
+        
+        # Apply circuit breaker limits if active
+        if self.circuit_breaker_level:
+            max_cb_leverage = CIRCUIT_BREAKERS[self.circuit_breaker_level]['max_leverage']
+            leverage = min(leverage, max_cb_leverage)
+        
+        # Enforce global hard limit
+        leverage = max(1, min(leverage, MAX_LEVERAGE))
         
         # Fixed dollar amounts based on confidence
         if confidence >= 75:
             position_size_dollars = HIGH_CONFIDENCE_POSITION_SIZE  # $1200 for 75%+ confidence
-            leverage = HIGH_CONFIDENCE_LEVERAGE
         elif confidence >= 70:
             position_size_dollars = MEDIUM_CONFIDENCE_POSITION_SIZE  # $1000 for 70-74% confidence
-            leverage = BASE_LEVERAGE
         else:
             # Below 70% - use smaller fixed amount
             position_size_dollars = LOW_CONFIDENCE_POSITION_SIZE  # $800 for <70% confidence
-            leverage = BASE_LEVERAGE
+        
+        # Apply time-based size multiplier
+        position_size_dollars = position_size_dollars * size_multiplier
         
         # Calculate percentage for reporting/validation purposes
         size_percent = position_size_dollars / balance if balance > 0 else 0
@@ -111,10 +142,108 @@ class RiskManager:
             position_size_dollars = balance * 0.95  # Use 95% of balance max
             size_percent = 0.95
         
+        # Log leverage calculation
+        strategy_display = strategy_type or 'UNKNOWN'
+        print(f"   📊 Strategy Leverage: {strategy_display} | Base: {STRATEGY_LEVERAGE.get(strategy_type, 2)}x | Confidence: {confidence:.1f}% | Final: {leverage}x")
+        
         return {
             'size': position_size_dollars,
             'leverage': leverage,
             'size_percent': size_percent * 100
+        }
+    
+    def get_strategy_leverage(self, strategy_type: str, confidence: float, regime: str) -> int:
+        """
+        Calculate strategy-specific leverage with confidence and regime adjustments
+        Parameters:
+            strategy_type: Strategy type (TREND_FOLLOWING, MOMENTUM, BREAKOUT, etc.)
+            confidence: Trade confidence (0-100)
+            regime: Market regime (VOLATILE, STRONG_TREND_UP, etc.)
+        Returns:
+            int: Final leverage (1-5x)
+        """
+        from config import MAX_LEVERAGE
+        
+        # Get base leverage from strategy type (default to 2x if unknown)
+        base = STRATEGY_LEVERAGE.get(strategy_type, 2) if strategy_type else 2
+        
+        # Confidence adjustment
+        if confidence >= 85:
+            # High confidence: boost leverage by 1
+            adjusted = base + 1
+        elif confidence < 70 and regime == 'VOLATILE':
+            # Low confidence in volatile market: reduce leverage by 1
+            adjusted = base - 1
+        else:
+            # Standard: use base leverage
+            adjusted = base
+        
+        # Special rule: REVERSAL strategies never exceed 3x
+        if strategy_type == 'REVERSAL' or strategy_type == 'MEAN_REVERSION':
+            adjusted = min(adjusted, 3)
+        
+        # Enforce limits (min 1x, max 5x)
+        final_leverage = max(1, min(adjusted, MAX_LEVERAGE))
+        
+        return final_leverage
+    
+    def calculate_pyramid_size(
+        self, 
+        existing_position: Dict, 
+        base_size: float, 
+        confidence: float,
+        portfolio_value: float
+    ) -> Dict:
+        """
+        Calculate size for second position based on first's performance
+        Parameters:
+            existing_position: First position dict with pnl_percent, quantity, entry_price, etc.
+            base_size: Base position size in dollars
+            confidence: Confidence of new trade signal
+            portfolio_value: Total portfolio value
+        Returns:
+            dict with pyramid_size, multiplier, reason
+        """
+        first_position_pnl = existing_position.get('pnl_percent', 0)
+        
+        # Performance-based sizing
+        if first_position_pnl > 5:
+            multiplier = 1.3  # First trade very profitable = high conviction
+        elif first_position_pnl > 3:
+            multiplier = 1.1  # Moderately profitable
+        elif first_position_pnl > 0:
+            multiplier = 1.0  # Slightly profitable
+        else:
+            multiplier = 0.7  # First trade losing = lower conviction
+        
+        # Confidence factor
+        if confidence >= 85:
+            multiplier += 0.1
+        elif confidence < 75:
+            multiplier -= 0.1
+        
+        # Calculate final size
+        pyramid_size = base_size * multiplier
+        
+        # Ensure combined size doesn't exceed portfolio limits
+        existing_quantity = existing_position.get('quantity', 0)
+        existing_entry_price = existing_position.get('entry_price', 0)
+        existing_position_value = existing_quantity * existing_entry_price
+        
+        total_exposure = existing_position_value + pyramid_size
+        max_per_symbol = portfolio_value * 0.30  # 30% max per symbol
+        
+        if total_exposure > max_per_symbol:
+            pyramid_size = max(0, max_per_symbol - existing_position_value)
+        
+        # Enforce minimum size
+        if pyramid_size < 100:  # Minimum $100
+            pyramid_size = 0
+        
+        return {
+            'pyramid_size': pyramid_size,
+            'multiplier': multiplier,
+            'reason': f"First position PnL: {first_position_pnl:.2f}%"
         }
     
     def calculate_optimal_leverage(self, confidence: float, regime: str) -> int:
